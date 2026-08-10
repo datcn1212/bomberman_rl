@@ -1,0 +1,4 @@
+episode,coins_collected,crates_destroyed,total_reward,epsilon
+0,0,2,-10.39,1.0
+1,0,2,-7.655,0.525
+2,0,2,-20.094999999999978,0.050000000000000044

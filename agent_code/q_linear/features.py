@@ -9,6 +9,16 @@ N_FEATURES = 20
 POSITION_HISTORY_LENGTH = 8
 
 
+def stuck_ratio(position_history):
+    """1 - (distinct tiles in position_history) / len(position_history).
+    0 if empty. Shared by callbacks.py and train.py so both compute the
+    "spatial stuck-ness" feature the same way.
+    """
+    if len(position_history) == 0:
+        return 0.0
+    return 1.0 - len(set(position_history)) / len(position_history)
+
+
 def _bfs_to_nearest(field, start, targets):
     """BFS over free tiles (field == 0) from start to the closest target.
 
@@ -86,6 +96,17 @@ def _danger_tiles(field, bombs, explosion_map):
     return danger
 
 
+def in_danger(game_state: dict) -> bool:
+    """Whether the agent's CURRENT position is inside a bomb blast line or
+    active explosion. Exposed separately from state_to_features so train.py
+    can use it to compute a direct reward penalty, not just a feature.
+    """
+    field = game_state['field']
+    pos = game_state['self'][3]
+    danger = _danger_tiles(field, game_state['bombs'], game_state['explosion_map'])
+    return pos in danger
+
+
 def nearest_target_distance(game_state: dict):
     """Shortest-path distance to the nearest target (coin, or crate-adjacent
     tile if no coin is visible yet), or None if none is reachable.
@@ -125,13 +146,12 @@ def nearest_crate_spot_distance(game_state: dict):
     return dist
 
 
-def state_to_features(game_state: dict, recently_visited: bool = False) -> np.ndarray:
+def state_to_features(game_state: dict, stuck_ratio: float = 0.0) -> np.ndarray:
     """20-dim vector: [4] one-hot BFS direction to nearest COIN (all zero if
     none visible), [4] one-hot BFS direction to nearest crate-adjacent tile
     (all zero if a coin is visible), [4] valid-move flags, [4] "would moving
     this direction be dangerous", [1] "am I in danger now", [1] "is dropping
-    a bomb here worthwhile", [1] "have I been at this tile in the last
-    POSITION_HISTORY_LENGTH steps", [1] bias.
+    a bomb here worthwhile", [1] "spatial stuck-ness" (see below), [1] bias.
 
     Coin-seeking and crate-seeking are kept as two separate 4-dim blocks
     (not one shared block, as in the Task 1 version) because a linear model
@@ -139,13 +159,24 @@ def state_to_features(game_state: dict, recently_visited: bool = False) -> np.nd
     here then drop a bomb" (crate) when both share the same one-hot
     direction dimensions.
 
-    `recently_visited` must be computed by the caller (it depends on the
-    agent's own trajectory history, not on `game_state` alone) — see
-    `callbacks.py`'s `act()` and `train.py`'s `_store()` for how it's
-    tracked. Without it, a purely reactive (memoryless) linear policy can
-    get stuck oscillating forever between two tiles with mutually higher
-    Q-values than any alternative, since both tiles always produce the
-    exact same feature vector every time they're revisited.
+    `stuck_ratio` must be computed by the caller from the agent's own
+    trajectory history, not from `game_state` alone — see `callbacks.py`'s
+    `act()` and `train.py`'s `_store()`. It is `1 - (distinct tiles in the
+    last POSITION_HISTORY_LENGTH steps) / POSITION_HISTORY_LENGTH`: 0 when
+    every recent step covered new ground, close to 1 when recent steps kept
+    revisiting a small handful of tiles.
+
+    An earlier version used a binary "have I been at this EXACT tile
+    recently" flag instead. That caught one specific oscillating tile pair
+    but not the underlying problem: many different (x, y) positions with
+    similar local surroundings (no coin visible, same crate direction, same
+    wall pattern) produce an IDENTICAL feature vector ("aliasing"), so a
+    deterministic policy can cycle between any such aliased pair — fixing
+    one specific pair just relocated the cycle to a different one with the
+    same shape (verified: (15,15)<->(15,14), then (1,1)<->(2,1), then
+    (15,1)<->(14,1) across successive fixes). A continuous, tile-identity
+    independent "am I covering new ground" signal generalizes across all
+    such aliased pairs instead of chasing them one at a time.
     """
     field = game_state['field']
     x, y = game_state['self'][3]
@@ -183,7 +214,7 @@ def state_to_features(game_state: dict, recently_visited: bool = False) -> np.nd
     adjacent_crate = any(field[x + dx, y + dy] == 1 for dx, dy in _DIRS.values())
     features[17] = 1.0 if (has_bomb and adjacent_crate and not in_danger_now) else -1.0
 
-    features[18] = 1.0 if recently_visited else 0.0
+    features[18] = float(stuck_ratio)
 
     features[19] = 1.0  # bias
     return features
