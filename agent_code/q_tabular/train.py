@@ -5,7 +5,8 @@ import numpy as np
 
 import events as e
 from .features import (encode_state, nearest_coin_distance, nearest_crate_spot_distance,
-                        stuck_ratio, in_danger, ACTIONS, POSITION_HISTORY_LENGTH)
+                        can_bomb_opponent_now, stuck_ratio, in_danger, ACTIONS,
+                        POSITION_HISTORY_LENGTH)
 
 ALPHA = float(os.environ.get("Q_TABULAR_ALPHA", "0.2"))
 GAMMA = float(os.environ.get("Q_TABULAR_GAMMA", "0.95"))
@@ -20,6 +21,7 @@ CRATE_POTENTIAL_WEIGHT = float(os.environ.get("Q_TABULAR_CRATE_WEIGHT", "0.3"))
 COIN_POTENTIAL_WEIGHT = float(os.environ.get("Q_TABULAR_COIN_WEIGHT", "1.0"))
 STUCK_PENALTY_WEIGHT = float(os.environ.get("Q_TABULAR_STUCK_PENALTY", "0.5"))
 DANGER_PENALTY_WEIGHT = float(os.environ.get("Q_TABULAR_DANGER_PENALTY", "1.0"))
+BOMB_NEAR_OPPONENT_BONUS = float(os.environ.get("Q_TABULAR_BOMB_NEAR_OPPONENT", "1.0"))
 
 # Same reward/shaping design as q_linear/train.py -- these choices are about
 # the MDP itself (which events matter, how potential-based shaping and the
@@ -40,6 +42,10 @@ REWARDS = {
     e.KILLED_SELF: -5.0,
     e.GOT_KILLED: -5.0,
     e.WAITED: -0.1,
+    # Task 3/4 addition: weighted 5x COIN_COLLECTED to match the actual
+    # tournament scoring ratio (coin = 1 point, kill = 5 points per
+    # settings/final_project.pdf), not a value picked by feel.
+    e.KILLED_OPPONENT: 5.0,
 }
 
 
@@ -48,9 +54,11 @@ def setup_training(self):
     self.epsilon = EPS_START
     self.round_reward = 0.0
     self.round_crates = 0
+    self.round_kills = 0
     self.best_crate_distance = float('inf')
     with open(LOG_PATH, "w", newline="") as f:
-        csv.writer(f).writerow(["episode", "coins_collected", "crates_destroyed", "total_reward", "epsilon"])
+        csv.writer(f).writerow(["episode", "coins_collected", "crates_destroyed", "opponents_killed",
+                                 "total_reward", "epsilon"])
 
 
 def _potential(self, game_state):
@@ -84,6 +92,20 @@ def _shaped_reward(self, old_game_state, new_game_state, events):
     reward -= STUCK_PENALTY_WEIGHT * _stuck_penalty(self, new_game_state)
     if new_game_state is not None and in_danger(new_game_state):
         reward -= DANGER_PENALTY_WEIGHT
+    # Dense bonus for actually dropping a bomb while an opponent is in blast
+    # range, separate from the sparse KILLED_OPPONENT event. Motivation: a
+    # crate is stationary, so CRATE_DESTROYED alone already gives frequent
+    # feedback for "bombing here was good"; an opponent moves every step
+    # (peaceful_agent moves randomly on EVERY turn), so it can easily wander
+    # out of the blast before the BOMB_TIMER=4 fuse goes off even when the
+    # agent's positioning was correct -- KILLED_OPPONENT alone was too rare
+    # to learn from (0.01-0.03 kills/round average across 3 different state
+    # designs and 8000-24000 training episodes). This rewards the SETUP
+    # (being positioned to threaten a kill), which happens far more often
+    # than the kill itself, independent of whether the opponent escapes.
+    if (old_game_state is not None and e.BOMB_DROPPED in events
+            and can_bomb_opponent_now(old_game_state)):
+        reward += BOMB_NEAR_OPPONENT_BONUS
     return reward
 
 
@@ -100,6 +122,7 @@ def game_events_occurred(self, old_game_state, self_action, new_game_state, even
     reward = _shaped_reward(self, old_game_state, new_game_state, events)
     self.round_reward += reward
     self.round_crates += events.count(e.CRATE_DESTROYED)
+    self.round_kills += events.count(e.KILLED_OPPONENT)
     next_state = encode_state(new_game_state, stuck_ratio(self.position_history))
     _update(self, self.last_state, ACTIONS.index(self_action), reward, next_state)
 
@@ -108,16 +131,18 @@ def end_of_round(self, last_game_state, last_action, events):
     reward = _shaped_reward(self, last_game_state, None, events)
     self.round_reward += reward
     self.round_crates += events.count(e.CRATE_DESTROYED)
+    self.round_kills += events.count(e.KILLED_OPPONENT)
     _update(self, self.last_state, ACTIONS.index(last_action), reward, None)
 
     coins_collected = last_game_state['self'][1]
     with open(LOG_PATH, "a", newline="") as f:
         csv.writer(f).writerow([self.episode_counter, coins_collected, self.round_crates,
-                                 self.round_reward, self.epsilon])
+                                 self.round_kills, self.round_reward, self.epsilon])
 
     self.episode_counter += 1
     self.round_reward = 0.0
     self.round_crates = 0
+    self.round_kills = 0
     self.best_crate_distance = float('inf')
 
     decay_episodes = max(1, int(TOTAL_EPISODES * EPS_DECAY_FRAC))

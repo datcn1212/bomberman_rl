@@ -122,22 +122,108 @@ escape_dir khop voi argmax: 316 / 319 (99.1%)
 
 **Thành công một phần - kết quả tốt nhất tìm được**: coin tăng ~67% so với baseline (1.46 -> 2.44), suicide không tệ hơn đáng kể (khoảng dao động chồng lấn baseline). Đây là hướng DUY NHẤT trong 4 hướng thử cải thiện được coin_mean. Trực giác hợp lý: `classic` có ít crate-dense-area hơn và chỉ 9 coin (thay vì 50) nên tín hiệu "đặt bomb đúng chỗ" tới rất thưa nếu học từ đầu trên chính `classic` - bắt đầu từ 1 Q-table đã có sẵn kinh nghiệm đặt-bomb-và-thoát tích luỹ trên `loot-crate` (nơi tín hiệu này dày hơn nhiều lần) giúp `classic` không phải học lại từ số 0, chỉ cần tinh chỉnh cho mật độ crate/coin khác.
 
+### 3.5 Task 3 - san `peaceful_agent`: 4 hướng thử, kills không nhích khỏi mức nhiễu
+
+Mở rộng state để hỗ trợ đối thủ: thêm `opponent_dir` (5 giá trị, hướng BFS tới đối thủ gần nhất - N_STATES 600 -> 3.000), reward `KILLED_OPPONENT=5.0` (đúng tỉ lệ điểm thật: coin=1, hạ gục=5, theo `settings.py`/`final_project.pdf`). Cân nhắc rồi **không** thêm potential shaping theo khoảng cách đối thủ (khoảng cách sống, giống coin) - đối thủ không "biến mất" khi chỉ tới gần (khác coin, giống crate), nên có nguy cơ tái tạo đúng lỗi farmable-cycle đã tốn công sửa cho crate (mục 2.1 nguyên bản); giữ đơn giản, chỉ dùng feature hướng + reward trực tiếp.
+
+Kiểm tra trên `classic` đấu `peaceful_agent` (đối thủ đi ngẫu nhiên UP/DOWN/LEFT/RIGHT mỗi bước, không né nguy hiểm, không đặt bomb - không phải mục tiêu khó bắt về mặt chiến thuật). Baseline không đối thủ (mục 3.4-e) đạt suicide 73.6%: dùng làm mức tham chiếu.
+
+| # | Thay đổi | coins TB | kills TB | suicide_rate TB |
+|---|---|---|---|---|
+| v1 | Chỉ `opponent_dir`, curriculum 2 pha (loot-crate -> classic+doi thu) | 1.01 | **0.013** | 59.9% |
+| v2 | + `can_bomb_opponent` (dang doi thu trong tam no bom ngay bay gio), 2 pha | 1.58 | **0.027** | 94.9% |
+| v3 | Giống v2, doi sang curriculum 3 pha (loot-crate -> classic mot minh -> classic+doi thu) | 0.95 | **0.020** | 87.8% |
+| v4 | + reward dày cho hành động BOMB khi `can_bomb_opponent=1` (bất kể có giết được không) | 1.26 | **0.030** | 80.1% |
+
+**Cả 4 hướng đều thất bại ở đúng 1 điểm chung**: kills trung bình luôn nằm trong khoảng 0.013-0.030/round (tức khoảng 1 lần giết mỗi 30-75 round) - không có hướng nào tách biệt rõ khỏi nhiễu giữa các seed (từng lần chạy riêng lẻ dao động 0.00-0.08). Ba hướng đầu (v1-v3) còn làm suicide_rate TỆ HƠN hẳn baseline không đối thủ (60-95% so với 73.6%), dù đối thủ này không hề tấn công lại - cho thấy chỉ riêng việc THÊM state/hành vi truy đuổi (đòi hỏi định vị mạo hiểm hơn để tới gần) đã làm xáo trộn cơ chế thoát hiểm vốn đã không hoàn hảo.
+
+**Chẩn đoán**: khác với crate (đứng yên, phủ khắp ~75% diện tích trống - bomb gần như luôn trúng gì đó), đối thủ chỉ có 1 và **di chuyển mỗi bước**. Với `BOMB_TIMER=4`, để giết được, đối thủ phải còn nằm trong vùng nổ SAU 4 bước ngẫu nhiên tiếp theo - kể cả khi agent đặt bomb đúng vị trí lý tưởng tại thời điểm đặt, xác suất đối thủ tình cờ vẫn còn trong vùng nổ 4 bước sau (di chuyển ngẫu nhiên đều 4 hướng mỗi bước) vốn dĩ thấp. `KILLED_OPPONENT` vì vậy là tín hiệu quá thưa để học từ đó, bất kể feature mô tả trạng thái tốt tới đâu - đây có khả năng là giới hạn XÁC SUẤT gắn liền với kịch bản (bắn trúng mục tiêu di chuyển ngẫu nhiên bằng vũ khí trễ), không phải lỗi thiết kế feature/reward có thể vá nhanh. Thử thêm reward dày cho riêng hành động "bấm bomb khi trong tầm" (v4, tách khỏi việc giết thành công) cũng không đổi được kết quả - ủng hộ thêm cho chẩn đoán này thay vì bác bỏ.
+
+**Dừng lại ở đây sau 4 lần thử có phương pháp** (mỗi lần đều 3-seed, mỗi lần thay đổi đúng 1 biến), không tiếp tục đoán-sửa thêm mà chưa có hướng mới thực sự khác biệt về cơ chế.
+
+### 3.6 Task 4 - đấu `rule_based_agent`: cùng nút thắt cũ, không phải đối thủ khó hơn
+
+Dùng nguyên pipeline v4 (curriculum 3 pha + `can_bomb_opponent` + reward dày cho setup bắn, mục 3.5), chỉ đổi đối thủ từ `peaceful_agent` sang `rule_based_agent` (agent BFS có sẵn trong framework: biết tìm coin/crate gần nhất, né nguy hiểm, tự đặt bomb - đối thủ chủ động và có năng lực thật, khác hẳn `peaceful_agent` đi ngẫu nhiên). 3-seed, cùng ngân sách episode:
+
+| Lần | coins | kills | suicide_rate |
+|---|---|---|---|
+| 1 | 0.76 | 0.00 | 0.842 |
+| 2 | 0.64 | 0.01 | 0.802 |
+| 3 | 0.38 | 0.00 | 0.816 |
+| **Trung bình** | **0.59** | **0.003** | **82.0%** |
+
+**Phát hiện quan trọng nhất: nguyên nhân chính KHÔNG phải đối thủ giỏi hơn.** `suicides` trong thống kê framework chỉ đếm riêng sự kiện `KILLED_SELF` (tự sát bằng bomb của chính mình), tách biệt với việc bị đối thủ hạ (`GOT_KILLED`). 82% round kết thúc bằng tự sát - agent tự giết mình bằng chính bomb của nó, không phải thua đối thủ. Điều này cho thấy Task 4 KHÔNG bị chặn bởi việc `rule_based_agent` mạnh hơn `peaceful_agent`, mà bị chặn bởi ĐÚNG nút thắt suicide_rate đã ghi nhận ở Task 2 (mục 3.4: baseline solo đã 66.7-74%) - việc thêm đối thủ (dù thụ động hay chủ động) chỉ làm lộ rõ hơn một vấn đề đã tồn tại từ trước, không phải tạo ra vấn đề mới. `kills` gần như tuyệt đối bằng 0 (0.003, còn thấp hơn cả mức đã thấp của Task 3 vs `peaceful_agent`) - hợp lý vì `rule_based_agent` chủ động né nguy hiểm nên càng khó bị bắt trúng hơn một agent đi ngẫu nhiên.
+
+**Kết luận: cả Task 3 và Task 4 hiện đang bị chặn bởi CÙNG MỘT nút thắt gốc chưa giải quyết được ở Task 2** (tỉ lệ tự sát cao do cơ chế thoát hiểm chưa đủ vững, mục 3.4), chứ không phải các vấn đề riêng của việc săn/đấu đối thủ. Mở rộng sang Task 3/4 trước khi giải quyết triệt để vấn đề này ở gốc (Task 2) có phần sớm - hai hướng thất bại (kills thấp, suicide cao) có chung một cha, không phải hai vấn đề độc lập.
+
+### 3.7 Quay lại Task 2: tìm đúng nguyên nhân gốc của suicide_rate bằng debug trace theo trình tự chết, không chỉ theo từng bước riêng lẻ
+
+Debug trace ở mục 3.4-b (kiểm tra `escape_dir` có khớp hành động tốt nhất không, 99% khớp) chỉ trả lời được "agent có làm đúng việc CẦN làm khi đang biết mình nguy hiểm không" - chưa trả lời được "sau khi thoát xong, chuyện gì xảy ra tiếp". Lần này debug trace theo **toàn bộ trình tự** dẫn tới cái chết (không chỉ 1 bước riêng lẻ), train lại 1 model curriculum classic-solo trên code hiện tại rồi soi 30 round bằng `Q_TABULAR_DEBUG=1`.
+
+**Mẫu lặp lại giống hệt nhau ở MỌI round chết được xem xét**:
+```
+step N:   dat bomb (can_bomb=1 -> BOMB)
+step N+1: danger=1, escape=X, di dung huong X (thoat)
+step N+2: danger=1, escape=Y, di dung huong Y (thoat tiep)
+step N+3: danger=0 (!) nhung target_dir keo nguoc lai ve huong vua thoat ra
+step N+4: buoc thang vao vung no CON HIEU LUC (khoi con nguy hiem them 1 round
+          sau khi no, theo dung co che game), chet
+```
+
+**Nguyên nhân**: `danger_now` chỉ phản ánh ô đang đứng, không có tín hiệu nào cảnh báo "bước tới hướng này sẽ nguy hiểm". `target_dir` (hướng BFS tới coin/crate, chi phối hành vi mặc định khi không còn `danger_now=1`) chỉ né tường/crate (`field != 0`), không hề né các ô đang trong vùng nổ/khói. Ngay khi thoát ra khỏi vùng nguy hiểm (danger_now trở lại 0), agent quay về chế độ tìm coin/crate như bình thường - và vì vị trí vừa bomb thường là chính hướng agent đang tìm tới, nó bước ngược thẳng vào đúng vùng nổ vừa thoát ra.
+
+**Sửa lần 1 (sai, gây sụp nghiêm trọng)**: thêm `avoid=danger` vào BFS của CẢ `target_dir` LẪN `escape_dir`. Kết quả: suicide_rate=100%, round dài trung bình chỉ 11 bước (từ ~74% suicide tệ đi thành gần như luôn chết ngay). Nguyên nhân: khi đang đứng TRONG vùng nổ (đường thẳng 3 ô mỗi hướng từ tâm bomb), đường thoát thường đòi hỏi đi qua THÊM 1-2 ô vẫn còn nằm trong vùng nổ đó trước khi ra hẳn - né toàn bộ vùng nguy hiểm ngay trong lúc tìm đường thoát khiến BFS không tìm được đường nào, `escape_dir` gần như luôn thành NONE đúng lúc cần nó nhất.
+
+**Sửa lần 2 (đúng, đã verify)**: chỉ thêm `avoid=danger` cho `target_dir` (và `opponent_dir`), **giữ nguyên `escape_dir` không né** (chỉ cần đảm bảo Ô ĐÍCH không nguy hiểm qua `_safe_tiles`, đường đi tới đó được phép băng qua vùng nguy hiểm còn lại). Verify lại bằng debug trace: **0/30 round chết** trên cùng model vừa gây sụp ở trên.
+
+**Kết quả 3-seed đầy đủ sau fix** (curriculum 8k+8k, mọi hyperparameter khác giữ nguyên):
+
+| Scenario | coins TB (trước fix -> sau fix) | suicide_rate TB (trước fix -> sau fix) |
+|---|---|---|
+| `classic` | 2.44 +/- 0.62 -> **5.52 +/- 2.23** (/9) | 73.6% +/- 25.2% -> **28.5% +/- 23.8%** |
+| `loot-crate` | 9.92 +/- 4.55 -> **24.86 +/- 12.49** (/50) | 58.8% +/- 26.8% -> **41.1% +/- 41.9%** |
+| `coin-heaven` (Task 1, sanity) | 50.00/50, 0% suicide (không đổi) | 50.00/50, 0% suicide (không đổi) |
+
+**coins TB trên `classic` tăng hơn gấp đôi (2.26 lần), suicide_rate giảm hơn nửa** - cải thiện rõ rệt và nhất quán trên cả 2 scenario Task 2, đồng thời không ảnh hưởng tới Task 1 (đúng như dự đoán vì `coin-heaven` không có crate nên đường đi hiếm khi băng qua vùng nổ). Biến động giữa seed vẫn còn lớn (đặc biệt `loot-crate`: 7.23 -> 34.76 coin tuỳ seed) - xem mục 4.
+
+**Bài học phương pháp quan trọng nhất của toàn bộ hành trình**: gốc rễ vấn đề suicide_rate không nằm ở TRỌNG SỐ reward (4 hướng thử ở mục 3.4 đều chỉnh tham số) mà nằm ở một **lỗ hổng logic cụ thể, cục bộ** trong cách tính feature - chỉ lộ ra khi debug trace theo TRÌNH TỰ nhiều bước dẫn tới cái chết, thay vì chỉ kiểm tra từng bước riêng lẻ hoặc quét tham số. Đây là bằng chứng ủng hộ mạnh cho quy tắc đã được nhắc đi nhắc lại xuyên suốt dự án: "tìm nguyên nhân cốt lõi bằng bằng chứng cụ thể trước khi suy đoán-sửa".
+
+### 3.8 Chạy lại Task 3/4 với fix mục 3.7: kết quả phân hoá rõ rệt - Task 3 cải thiện mạnh, Task 4 thì không
+
+Dùng nguyên pipeline v4 (mục 3.5/3.6), chỉ khác `target_dir`/`opponent_dir` giờ đã né vùng nguy hiểm. 3-seed mỗi đối thủ:
+
+| Đối thủ | coins TB (trước -> sau fix) | kills TB (trước -> sau fix) | suicide_rate TB (trước -> sau fix) |
+|---|---|---|---|
+| `peaceful_agent` (Task 3) | 1.26 -> **3.25** | 0.03 -> **0.227** | 80.1% -> **39.0%** |
+| `rule_based_agent` (Task 4) | 0.59 -> **0.59** | 0.003 -> **0.003** | 82.0% -> **88.6%** |
+
+**Task 3 cải thiện rõ rệt trên cả 3 chỉ số** - kills tăng ~7.5 lần (dù vẫn còn nhỏ và biến động mạnh giữa seed: 0.04/0.09/0.55), coins tăng ~2.6 lần, suicide giảm gần nửa. Xác nhận đúng nghi ngờ đặt ra ở cuối mục 3.6: một phần đáng kể khó khăn quan sát được ở Task 3 (mục 3.5) thực ra là hệ quả của lỗi feature vừa sửa, không phải giới hạn xác suất "bắn trúng mục tiêu di chuyển" như chẩn đoán ban đầu - tuy giới hạn xác suất đó vẫn có thật (kills 0.227 vẫn còn thấp so với coins/crates), nhưng không còn là lời giải thích đầy đủ.
+
+**Task 4 hoàn toàn không cải thiện, thậm chí suicide còn tăng nhẹ** (82.0% -> 88.6%). Khác biệt cốt lõi so với Task 3: `rule_based_agent` (không như `peaceful_agent`) TỰ MÌNH đặt bomb, tạo ra một nguồn nguy hiểm ĐỘNG thứ hai độc lập với bomb của chính agent. Fix ở mục 3.7 chỉ dạy `target_dir` né vùng nguy hiểm đã biết TẠI THỜI ĐIỂM tính state - khi có 2 tác nhân cùng đặt bomb, vùng nguy hiểm thay đổi nhanh hơn và phức tạp hơn nhiều (một ô "an toàn" lúc tính state có thể đã nằm trong vùng nổ MỚI của đối thủ ngay bước sau), nên cùng một lớp lỗi ("đi vào vùng nguy hiểm vì state không phản ánh đúng thời điểm") nhiều khả năng vẫn tồn tại dưới dạng khác, không được fix hiện tại xử lý.
+
+**Kết luận cập nhật**: nút thắt suicide gốc (mục 3.7) đã giải quyết được cho kịch bản 1 nguồn nguy hiểm (agent tự đặt bomb - Task 2, và Task 3 vì `peaceful_agent` không đặt bomb). Task 4 cần một lớp xử lý riêng cho nguy hiểm từ NHIỀU nguồn động cùng lúc - chưa thử trong phiên làm việc này.
+
 ## 4. Nhận xét
 
 **Xác nhận giả thuyết state-aliasing**: toàn bộ hành trình debug Linear Q ở Task 2 (`bao_cao_task2.md`) xoay quanh việc phát hiện và vá lỗi bẫy dao động tất định giữa 2 vị trí có feature vector giống hệt nhau qua lăng kính linear - một dạng aliasing đặc thù của hàm xấp xỉ. Chuyển sang tabular (mỗi state có Q-value độc lập, không chia sẻ trọng số) loại bỏ tận gốc khả năng xảy ra kiểu bẫy đó, và kết quả xác nhận trực tiếp: cùng reward, cùng ngân sách episode, tabular vừa học nhanh hơn (Task 1: 50.00 tuyệt đối so với 48.00+/-0.57) vừa transfer được sang scenario mà linear hoàn toàn bó tay (`classic`: 1.46+/-0.67 so với 0.000).
 
-**Suicide_rate là bài toán khó hơn dự kiến, không phải "chỉ cần tune 1 tham số"**: 4 hướng thử độc lập ở mục 3.4 cho thấy vấn đề không nằm ở (a) trọng số phạt nguy hiểm quá thấp - tăng nó chỉ làm sụp toàn bộ hành vi đặt bomb; (b) chọn sai hướng thoát - đã verify bằng debug trace, hướng thoát đúng 99% số lần; (c) `can_bomb_here` quá lỏng lẻo về mặt thời gian - sửa chặt hơn làm tệ hơn hẳn cả 6/6 lần thử; (d) chưa đủ dữ liệu train - gấp 2.5 lần episode không đổi được gì. Đòn bẩy DUY NHẤT thực sự hiệu quả là (e) đổi phân phối dữ liệu huấn luyện (curriculum learning), không phải chỉnh tham số reward hay feature. Bài học chung: khi 1 hướng "tune tham số hợp lý về lý thuyết" liên tục thất bại thực nghiệm theo cùng 1 kiểu (ngưỡng sụp/không đổi), nhiều khả năng nút thắt nằm ở PHÂN PHỐI TRẢI NGHIỆM huấn luyện chứ không phải trọng số/feature.
+**Suicide_rate: 4 hướng chỉnh tham số thất bại, 1 lỗi feature cụ thể mới là gốc rễ (mục 3.7)** - 4 hướng thử độc lập ở mục 3.4 (tăng phạt nguy hiểm, siết `can_bomb_here` theo thời gian, train lâu hơn, chỉ curriculum learning giúp một phần) đều KHÔNG chạm tới nguyên nhân thật: `target_dir` dẫn đường bằng BFS chỉ né tường/crate, không né vùng nổ còn hiệu lực, nên ngay sau khi thoát hiểm thành công, agent bị dẫn ngược trở lại đúng vùng nổ vừa thoát ra. Chỉ phát hiện được khi debug trace theo TRÌNH TỰ nhiều bước dẫn tới cái chết (không phải kiểm tra từng bước rời rạc như mục 3.4-b đã làm). Sau khi sửa đúng chỗ (mục 3.7): coins TB trên `classic` từ 2.44 lên **5.52/9** (tăng 2.26 lần), suicide từ 73.6% xuống **28.5%**.
 
-**Biến động giữa seed vẫn lớn** kể cả với curriculum learning (coins 1.68 -> 3.19, suicide 38.0% -> 93.6%) - lớn hơn hẳn linear ở cả Task 1 (độ lệch chuẩn ~0.57/48, ~1.2%) lẫn Task 2 (0.14/0.85, ~16%). Đặc điểm này xuất hiện xuyên suốt mọi cấu hình tabular đã thử (mục 3.2-3.4), không riêng gì 1 hướng - khả năng gắn với việc 600 state độc lập (không chia sẻ trọng số như linear) cần nhiều dữ liệu hơn để MỌI state hội tụ đều, đặc biệt state hiếm.
+**Biến động giữa seed vẫn lớn, thậm chí lớn hơn sau fix** (`loot-crate`: 7.23 -> 34.76 coin tuỳ seed) - lớn hơn hẳn linear ở cả Task 1 (độ lệch chuẩn ~0.57/48, ~1.2%) lẫn Task 2 (0.14/0.85, ~16%). Đặc điểm này xuất hiện xuyên suốt mọi cấu hình tabular đã thử, không riêng gì 1 hướng - khả năng gắn với việc hàng nghìn state độc lập (không chia sẻ trọng số như linear) cần nhiều dữ liệu hơn để MỌI state hội tụ đều, đặc biệt state hiếm.
+
+**Task 3/Task 4 (mục 3.5, 3.6) được thử TRƯỚC KHI tìm ra fix ở mục 3.7** - đã chạy lại cả hai với fix (mục 3.8): Task 3 cải thiện mạnh trên mọi chỉ số (kills x7.5, coins x2.6, suicide giảm gần nửa), Task 4 hoàn toàn không đổi. Kết luận: lỗi feature ở mục 3.7 giải thích phần lớn khó khăn của Task 3 nhưng KHÔNG phải nguyên nhân chính của Task 4 - Task 4 có một nút thắt riêng (nguy hiểm từ nhiều nguồn động - đối thủ tự đặt bomb) chưa được xử lý.
 
 ## 5. Hạn chế và hướng tiếp theo
 
-- **Kết quả tốt nhất tìm được cho `classic`** (curriculum learning, mục 3.4-e: 2.44+/-0.62/9 coin, suicide 73.6%+/-25.2%) vẫn còn xa mức "giải tốt" - trung bình chỉ ~27% trần điểm, đa số round vẫn kết thúc bằng tự sát. Chưa phải ứng viên nộp bài, nhưng là điểm khởi đầu tốt hơn hẳn baseline ban đầu (mục 3.3) và hơn hẳn linear (0.000 tuyệt đối).
-- Chưa quét hyperparameter cho curriculum learning (tỉ lệ episode phase 1/phase 2, thử phase 2 dài hơn phase 1, hay ngược lại) - mới thử đúng 1 tỉ lệ (8k/8k) đã cho kết quả tốt hơn hẳn, có khả năng còn tối ưu được thêm.
+- **Đã giải quyết phần lớn nút thắt suicide_rate cho kịch bản 1 nguồn nguy hiểm** (Task 2 solo, Task 3 vs đối thủ không đặt bomb - mục 3.7, 3.8): coins TB `classic` 5.52+/-2.23/9 (61% trần điểm), Task 3 kills TB tăng lên 0.227/round. Vẫn chưa hoàn hảo (biến động seed lớn) nhưng là bước tiến rõ rệt.
+- **Task 4 (đấu `rule_based_agent`) vẫn chưa giải được, nút thắt khác Task 2/3** (mục 3.8): suicide 88.6%, kills ~0.003, không đổi so với trước fix. Cần xử lý nguy hiểm từ NHIỀU nguồn động cùng lúc (bomb của cả agent lẫn đối thủ) - có thể cần state nhận biết vị trí/thời điểm bomb của đối thủ chi tiết hơn hiện tại, hoặc tính lại `danger`/`escape_dir` thường xuyên hơn trong khi di chuyển thay vì chỉ 1 lần mỗi bước. Đây là hướng ưu tiên cho phiên làm việc tiếp theo nếu muốn giải Task 4.
+- Chưa quét hyperparameter cho curriculum learning (tỉ lệ episode giữa các pha) - có khả năng còn tối ưu được thêm.
 - Chưa tune `alpha`, `STUCK_PENALTY_WEIGHT` riêng cho tabular - toàn bộ kết quả trên dùng nguyên giá trị kế thừa từ linear hoặc chọn theo lý luận chung (mục 2.3), chưa quét thử.
-- Biến động giữa seed lớn (mục 4) là rủi ro thực tế nếu phải chọn 1 bảng Q cụ thể để nộp bài - nên đánh giá thêm 3-5 seed nữa cho cấu hình curriculum trước khi chốt, và cân nhắc chọn seed tốt nhất trong nhiều lần train (không chỉ chạy 1 lần) làm bản nộp cuối.
-- Chưa thử `rule_based_agent`/`coin_collector_agent`/`peaceful_agent` làm đối thủ (Task 3-4) cho agent này - mới dừng ở Task 1-2 (không có đối thủ), đúng phạm vi đã đặt ra. State hiện tại (mục 2.1) không mã hoá thông tin đối thủ, sẽ cần mở rộng trước khi thử Task 3-4.
+- Biến động giữa seed lớn (mục 4) là rủi ro thực tế nếu phải chọn 1 bảng Q cụ thể để nộp bài - nên đánh giá thêm 3-5 seed nữa cho cấu hình curriculum + fix trước khi chốt, và cân nhắc chọn seed tốt nhất trong nhiều lần train làm bản nộp cuối.
+- Chưa thử nghiệm liệu fix ở mục 3.7 có cần curriculum learning đi kèm hay không (mới test kết hợp cả 2), và chưa quét lại `DANGER_PENALTY_WEIGHT`/`STUCK_PENALTY_WEIGHT` trên nền code đã sửa - rất có thể các tham số này cần hiệu chỉnh lại vì động lực học đã đổi khác đáng kể.
 
 ## 6. Chi tiết tái lập
 
-Code: `agent_code/q_tabular/{features,callbacks,train}.py` (tự chứa hoàn toàn, không import từ `q_linear`). Cờ `Q_TABULAR_CONTINUE=1` (trong `callbacks.py`) cho phép tiếp tục train từ 1 bảng Q có sẵn thay vì luôn khởi tạo lại - dùng cho curriculum learning. Công cụ thí nghiệm (không nộp bài): `run_tabular_config.py` (train+eval 1 scenario), `run_tabular_curriculum.py` (train 2 pha + eval). Log/bảng Q từng lần chạy: `agent_code/q_tabular/{log,table}_<tên>.csv|npy`. Kết quả eval thô: `results/eval_<tên>.json`. Bảng Q tốt nhất hiện tại cho `classic` (curriculum, lần 3, coins=3.19): `agent_code/q_tabular/table_curriculum_run3.npy`.
+Code: `agent_code/q_tabular/{features,callbacks,train}.py` (tự chứa hoàn toàn, không import từ `q_linear`). Cờ `Q_TABULAR_CONTINUE=1` (trong `callbacks.py`) cho phép tiếp tục train từ 1 bảng Q có sẵn thay vì luôn khởi tạo lại - dùng cho curriculum learning. Công cụ thí nghiệm (không nộp bài): `run_tabular_config.py` (train+eval 1 scenario, không đối thủ), `run_tabular_curriculum.py` (train 2 pha + eval, Task 2), `run_tabular_task3.py` (train 3 pha + eval có đối thủ, đọc `by_agent` thay vì `by_round` vì framework cộng dồn coins/kills/suicides của TẤT CẢ agent theo round - xem docstring trong file). Log/bảng Q từng lần chạy: `agent_code/q_tabular/{log,table}_<tên>.csv|npy`. Kết quả eval thô: `results/eval_<tên>.json`.
+
+**Lưu ý quan trọng về khả năng tương thích state space giữa các bảng Q đã lưu**: state space đã thay đổi nhiều lần trong quá trình làm Task 3/4 (600 -> 3.000 -> 6.000 state khi thêm `opponent_dir`/`can_bomb_opponent`), và fix ở mục 3.7 KHÔNG đổi N_STATES nhưng đổi Ý NGHĨA one-hot của `target_dir`/`opponent_dir` (giờ né vùng nguy hiểm) - các bảng Q train TRƯỚC mục 3.7 (`table_curriculum_run*.npy`, `table_tabular_*.npy`, `table_task3*.npy`, `table_task4*.npy`) vẫn đúng SHAPE (6.000, 6) nên load được về mặt kỹ thuật nhưng mang ý nghĩa khác - không nên trộn lẫn, chỉ dùng các bảng `table_fixed_*.npy`/`table_debug_classic_solo_v3.npy` (train sau fix) làm điểm tham chiếu hiện tại. `q_tabular_table.npy` (đường dẫn mặc định) hiện vẫn là bảng curriculum 600-state CŨ (trước khi mở rộng Task 3/4) - cần cập nhật lại nếu chốt hướng đi tiếp theo.
