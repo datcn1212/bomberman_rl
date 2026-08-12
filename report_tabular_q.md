@@ -363,3 +363,115 @@ with potential-based shaping.
 **Decision.** `alpha_schedule = "visit"` from here on.
 
 ---
+
+## 5. Phase 3 - bombs, and danger as a schedule
+
+**What and why.** Task 2 adds crates, and crates can only be removed with
+bombs - so the agent must use the one action that can kill it. Phase 1 already
+showed why the minimal state cannot support that: with no representation of
+bombs, the states before dying are indistinguishable from safe ones, and the
+`-5` death penalty gets smeared over rows that are mostly fine.
+
+The design decision that follows from the Phase 0 measurements is that **danger
+is not a property of a tile but of a (tile, step) pair**. A tile can be lethal
+now and safe in two steps, or safe now and lethal in three. A boolean "am I in
+a blast radius" flag cannot express either, and an agent holding one has to
+treat a tile it could safely cross as a wall.
+
+So the features carry a schedule, `lethal[k][x, y]`, built from the measured
+timing rules, and two searches run on top of it:
+
+* **`escape_search`** - a breadth-first search over **(tile, step) pairs**
+  rather than tiles, asking whether any sequence of moves survives the whole
+  horizon. Because the search carries the step index, it will happily route a
+  path *through* a tile that burns later, which is often the only way out of a
+  corridor.
+* **`target_search`** - the Phase 1 coin search, extended so that a tile next to
+  a crate is also a goal (a crate cannot be walked onto, so adjacency is what
+  "arriving" means), and with tiles that burn now or next step treated as walls.
+
+State grows from 80 rows to **43740**:
+
+| component | radix | meaning |
+|---|---|---|
+| `move_status` | 81 | each neighbour: blocked / free-safe / free-lethal |
+| `t_here` | 5 | decisions until the current tile burns; 0 = it does not |
+| `target_dir` | 6 | direction to the nearest coin or crate, or "already there" |
+| `target_kind` | 3 | whether that target is a crate, a coin, or an opponent |
+| `escape_dir` | 6 | first move of a surviving path, or "none", or "stay" |
+
+`BOMB` is unmasked, and the reward gains `+0.3` per crate destroyed and `+0.1`
+per coin revealed, counted **per occurrence** so that a bomb clearing four
+crates is worth more than one clearing a single crate.
+
+### 5.1 Result
+
+`p3_danger`: `loot-crate`, 4000 episodes, 5 seeds, evaluated on 30 held-out
+seeds x 20 rounds.
+
+| metric | mean | per seed |
+|---|---|---|
+| coins | 20.21 | 22.0, 24.8, 10.2, 14.3, 29.7 |
+| crates destroyed | 62.55 | 68.3, 73.4, 38.7, 50.5, 81.8 |
+| bombs dropped | 25.13 | 26.4, 23.3, 14.2, 31.3, 30.4 |
+| **suicide rate** | **0.030** | 0.040, 0.007, 0.010, 0.025, 0.068 |
+| steps survived | 389.4 / 400 | |
+
+The agent bombs, clears crates, collects the coins underneath, and **almost
+never kills itself**. The danger model does its job. But the spread across seeds
+is enormous: 10.2 to 29.7 coins, a factor of three.
+
+### 5.2 Diagnosis: it is bomb *quality*, not bomb *quantity*
+
+The obvious hypothesis is that the weak seeds are too timid. The correlations
+say otherwise:
+
+| | correlation with coins |
+|---|---|
+| crates destroyed | **+0.996** |
+| bombs dropped | +0.540 |
+
+Coins are almost a deterministic function of crates destroyed, but only weakly
+related to how often the agent bombs. Seed 4 drops the **most** bombs of any
+seed (31.3 per round) and finishes second worst (14.3 coins), because its yield
+is 1.62 crates per bomb against seed 2's 3.15.
+
+To see where that yield goes, every bomb the trained policies chose to drop was
+audited: how many crates its blast would have covered, and whether an escape
+route existed at that moment (`tools/analyse_bombs.py`, 1405 bombs).
+
+| seed | bombs | hit 0 crates | hit 1 | hit 2+ | mean payload | no escape |
+|---|---|---|---|---|---|---|
+| 1 | 316 | 12% | 11% | 77% | 2.62 | **0** |
+| 2 | 252 | **0%** | 8% | 92% | 3.16 | **0** |
+| 3 | 104 | 3% | 6% | 91% | 3.40 | **0** |
+| 4 | 351 | **28%** | 10% | 61% | 2.19 | **0** |
+| 5 | 382 | 5% | 12% | 83% | 2.83 | **0** |
+| **all** | 1405 | 11% | 10% | 78% | 2.73 | **0 (0.0%)** |
+
+Two things stand out.
+
+**The danger model is exactly right.** Not one bomb out of 1405 was dropped from
+a position with no escape route. That is the direct measurement behind the 0.030
+suicide rate, and it says the remaining suicides come from walking into danger,
+not from self-trapping.
+
+**The waste is real and seed-dependent.** Overall 11% of bombs hit nothing at
+all, but the range runs from 0% (seed 2) to 28% (seed 4). The state cannot tell
+these apart: `target_kind = crate` and `target_dir = here` are true both when
+the blast would clear four crates and when it would clear none, because the
+crate that made the agent "arrive" may sit diagonally, where no blast reaches.
+
+The two weak seeds fail in **opposite** ways, which is why an aggregate like
+"bombs per round" hides the problem:
+
+* seed 4 bombs constantly and wastes 28% of it;
+* seed 3 bombs well (3.40 crates per bomb, the best of any seed) but only 104
+  times, a third of seed 5.
+
+**Comment.** This phase moved the agent from "cannot play Task 2 at all" to
+"plays it safely", and the safety half is solid. What is missing is not more
+learning but a distinction the state cannot currently draw: whether dropping a
+bomb *here* accomplishes anything. That is Phase 4.
+
+---

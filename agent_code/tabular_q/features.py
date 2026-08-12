@@ -205,6 +205,11 @@ class Board:
                     queue.append((nxt, first_move, dist + 1))
         return DIR_NONE, KIND_COIN, 0
 
+    def bomb_payload(self):
+        """How many crates a bomb dropped here would destroy."""
+        return sum(1 for tx, ty in blast_tiles(self.field, *self.pos)
+                   if self.field[tx, ty] == 1)
+
     def _next_to_crate(self, tile):
         x, y = tile
         for dx, dy in DIRS:

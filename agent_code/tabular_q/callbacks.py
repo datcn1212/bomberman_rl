@@ -23,6 +23,7 @@ def setup(self):
     self.epsilon = self.cfg.eps_start
     n = len(ACTIONS) if self.cfg.allow_bomb else ACTIONS.index("BOMB")
     self.legal = np.arange(n)
+    self.bomb_log = os.environ.get("TQ_BOMBLOG")
 
     # Training either continues an explicit checkpoint or starts empty. Playing
     # reads `model_path`, which defaults to the file shipped next to this one;
@@ -49,9 +50,28 @@ def act(self, game_state):
         choice = greedy(self.rng, values)
     action = int(self.legal[choice])
 
+    if self.bomb_log is not None:
+        _record_bomb(self, game_state, action)
+
     self.last_state = state
     self.last_action = action
     return ACTIONS[action]
+
+
+def _record_bomb(self, game_state, action):
+    """Diagnostic: what a chosen BOMB would actually have achieved.
+
+    Off unless TQ_BOMBLOG is set. Used to size how much of the score is lost to
+    bombs that hit nothing, which is not visible in the aggregate crate count.
+    """
+    if ACTIONS[action] != "BOMB" or not game_state["self"][2]:
+        return
+    from .features import Board
+    board = Board(game_state)
+    hypothetical = Board(game_state, extra_bomb=board.pos)
+    with open(self.bomb_log, "a") as fh:
+        fh.write("%d,%d,%d\n" % (game_state["step"], board.bomb_payload(),
+                                 hypothetical.escape_search()))
 
 
 def greedy(rng, values):
