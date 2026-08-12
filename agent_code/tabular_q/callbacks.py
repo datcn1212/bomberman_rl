@@ -24,9 +24,10 @@ def setup(self):
     n = len(ACTIONS) if self.cfg.allow_bomb else ACTIONS.index("BOMB")
     self.legal = np.arange(n)
 
-    # Training either continues an explicit checkpoint or starts empty; playing
-    # always uses the model shipped next to this file.
-    source = self.cfg.continue_from if self.train else MODEL_FILE
+    # Training either continues an explicit checkpoint or starts empty. Playing
+    # reads `model_path`, which defaults to the file shipped next to this one;
+    # the experiment harness overrides it to evaluate a specific checkpoint.
+    source = self.cfg.continue_from if self.train else self.cfg.model_path
     if source and os.path.isfile(source):
         self.model = QModel.load(source)
         self.logger.info("loaded model from %s", source)
@@ -35,7 +36,7 @@ def setup(self):
         self.logger.info("starting from an empty table")
     else:
         raise FileNotFoundError(
-            "no model at %s; the agent cannot play without one" % MODEL_FILE)
+            "no model at %s; the agent cannot play without one" % source)
 
 
 def act(self, game_state):

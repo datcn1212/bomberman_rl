@@ -140,3 +140,120 @@ neither crashes, neither shows up in a training curve, and both bias the value
 function in a direction that looks like "the agent is just not learning well".
 
 ---
+
+## 3. Phase 1 - the smallest agent that can solve Task 1
+
+**What and why.** Task 1 is coin collection on a board with no crates and no
+opponents (`coin-heaven`, 50 coins, 400 steps). The goal of this phase is not a
+good agent but a *baseline whose failures are understandable*, so the state was
+made as small as it can be while still being sufficient in principle:
+
+| component | radix | meaning |
+|---|---|---|
+| `move_status` | 16 | each of the four neighbours free or blocked (1 bit each) |
+| `target_dir` | 5 | first step of the shortest path to the nearest coin: none, UP, RIGHT, DOWN, LEFT |
+
+That is **80 table rows**, of which 32 are reachable on this scenario. The
+direction comes from a breadth-first search rather than from comparing
+coordinates, because the board has dead ends where the straight-line direction
+points into a wall.
+
+Rewards: `+1` coin, `-0.5` invalid action, `-0.05` wait, `-0.01` per step,
+`-5` for blowing oneself up. Exploration: epsilon-greedy, 1.0 to 0.05 linearly
+over 2000 episodes. Step size: constant `alpha = 0.1`, `gamma = 0.9`.
+
+### 3.1 The action set on Task 1
+
+A smoke test showed the agent killing itself in **every one of the first five
+episodes**: random exploration drops a bomb, and the state contains no
+information about bombs at all, so the consequence of that action is not
+representable - the states before dying are indistinguishable from safe ones.
+Since `coin-heaven` has no crates and no opponents, a bomb has no possible
+upside there, so Phase 1 masks `BOMB` out of the action set. The mask is removed
+again in Phase 2, when the state gains the information needed to survive a bomb.
+
+One detail this forces: the bootstrap `max` must run over **legal actions only**.
+With `BOMB` masked its row stays at zero, and a plain `max` would bootstrap from
+that zero whenever every legal action is worth less - an optimistic target
+taken from an action the agent cannot even choose.
+
+### 3.2 Result
+
+`p1_const`: 5 training seeds, evaluated on 30 held-out seeds x 20 rounds.
+
+| seed | coins / round | steps / round |
+|---|---|---|
+| 1 | 50.000 | 124.1 |
+| 2 | 50.000 | 124.0 |
+| 3 | **8.798** | **400.0** |
+| 4 | 50.000 | 123.8 |
+| 5 | 50.000 | 123.9 |
+
+Four seeds are **perfect** - all 50 coins, every round, in about 124 steps. One
+seed collects 8.8 coins and never finishes a round. The training logs give no
+warning: at episode 2000 seed 3 looked exactly like seed 1 (135 steps, ~50
+coins). The difference appears only under a **greedy** policy; during training
+the residual 5% exploration was enough to hide it.
+
+### 3.3 Diagnosis
+
+A table can be read, so the failure was located rather than guessed at
+(`tools/inspect_policy.py`). Across all 32 reachable states, seed 3 has
+**exactly one** whose greedy action disagrees with the coin direction:
+
+> **state 54** - a horizontal corridor (only LEFT and RIGHT free), nearest coin
+> to the **LEFT** - greedy action **RIGHT**, margin **0.0112**.
+
+In a corridor, walking away from the coin leads to another corridor tile with
+the same encoding, so the greedy policy repeats the same mistake until the
+corridor ends. One wrong row out of 32 costs 82% of the score.
+
+The obvious reading is "seed 3 was unlucky". The Q values across seeds say
+otherwise:
+
+| seed | Q(54, LEFT) | Q(54, RIGHT) | margin | visits |
+|---|---|---|---|---|
+| 1 | 3.6360 | 3.0977 | +0.5382 | 77390 |
+| 2 | 3.5032 | 3.0378 | +0.4654 | 76778 |
+| 3 | 3.1361 | 3.1473 | **-0.0112** | 76488 |
+| 4 | 3.6275 | 3.1710 | +0.4565 | 77321 |
+| 5 | 3.5395 | 3.1932 | +0.3463 | 77402 |
+
+Every seed updated this row about 77000 times, so this is not a data problem.
+To see what those updates were doing, the Q row of state 54 was logged **once
+per episode** (`trace_state` in the config) and the margin examined over the
+last 500 episodes:
+
+| seed | mean margin | sd | sign changes in 500 episodes | value at stop |
+|---|---|---|---|---|
+| 1 | +0.3554 | 0.1797 | 28 | +0.5382 |
+| 2 | +0.3271 | 0.1703 | 20 | +0.4654 |
+| 3 | +0.3461 | 0.2010 | 37 | **-0.0112** |
+| 4 | +0.3675 | 0.1894 | 28 | +0.4565 |
+| 5 | +0.3231 | 0.1815 | 36 | +0.3463 |
+
+This is the actual finding, and it is not the one the score table suggested:
+
+* **all five seeds learned the same correct preference** - the mean margin is
+  +0.32 to +0.37 everywhere, seed 3 included;
+* the noise on that estimate has sd ~0.18-0.20, **about half the signal**;
+* the margin **crosses zero 20 to 37 times in the last 500 episodes of every
+  seed**, including the four that scored 50.
+
+So no seed converged. The estimate is a stationary random walk around the right
+answer, and which policy comes out is decided by **which side of zero the walk
+happens to be on when training stops**. Four seeds stopped on the lucky side.
+
+This is textbook: a constant step size satisfies `sum(alpha) = inf` but not
+`sum(alpha^2) < inf`, so the Robbins-Monro conditions for almost-sure
+convergence do not hold. The practical form of that theorem here is that the
+estimate keeps a permanent variance proportional to `alpha`, and **a decision
+whose true margin is smaller than that noise is decided by chance**.
+
+**Comment.** The instructive part is how invisible this is. The reward curve is
+smooth, the training score is at its maximum, 96.8% of individual stopping times
+in seed 3 would have produced a working policy, and the resulting agent still
+loses 82% of its score. Any conclusion drawn from a single seed here would have
+been wrong - in either direction.
+
+---

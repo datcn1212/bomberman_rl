@@ -16,6 +16,12 @@ class Config:
     # --- learning ---------------------------------------------------------
     alpha: float = 0.1
     gamma: float = 0.9
+    # "constant" keeps alpha fixed, which violates the Robbins-Monro condition
+    # sum(alpha^2) < inf: the estimate never settles, it random-walks around the
+    # true value forever. "visit" divides by the visit count of the individual
+    # (state, action) pair, which satisfies it.
+    alpha_schedule: str = "constant"
+    alpha_half_life: float = 1000.0
 
     # --- exploration ------------------------------------------------------
     eps_start: float = 1.0
@@ -34,6 +40,11 @@ class Config:
     reward_step: float = -0.01
     reward_wait: float = -0.05
     reward_killed_self: float = -5.0
+
+    # --- diagnostics ------------------------------------------------------
+    # Index of one table row whose Q values are written to the training log each
+    # episode. Used to watch a single decision converge (or fail to).
+    trace_state: int = -1
 
     # --- bookkeeping ------------------------------------------------------
     n_episodes: int = 1000

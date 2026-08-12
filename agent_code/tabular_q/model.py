@@ -41,6 +41,21 @@ class QModel:
         self.seen[state, action] += 1
         self.q[state, action] += alpha * (target - self.q[state, action])
 
+    def effective_alpha(self, state, action, cfg):
+        """Step size for one update.
+
+        With "visit" the step size decays as alpha / (1 + n/half_life), where n
+        counts updates of this (state, action) pair specifically. Pairs that are
+        rare keep learning fast while pairs seen tens of thousands of times
+        settle down, which a global decay schedule cannot do.
+        """
+        if cfg.alpha_schedule == "constant":
+            return cfg.alpha
+        if cfg.alpha_schedule == "visit":
+            n = self.seen[state, action]
+            return cfg.alpha / (1.0 + n / cfg.alpha_half_life)
+        raise ValueError("unknown alpha_schedule %r" % cfg.alpha_schedule)
+
     def save(self, path):
         with open(path, "wb") as fh:
             pickle.dump(self, fh)
