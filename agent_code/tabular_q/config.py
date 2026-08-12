@@ -1,0 +1,62 @@
+"""Hyperparameters for the tabular agent.
+
+Every knob lives here so that an experiment is fully described by one JSON file.
+`tools/train.py` writes that file and points the agent at it through the
+TQ_CONFIG environment variable, which keeps the agent itself free of any
+command line parsing and makes each run reproducible from its config alone.
+"""
+
+import json
+import os
+from dataclasses import dataclass, fields
+
+
+@dataclass
+class Config:
+    # --- learning ---------------------------------------------------------
+    alpha: float = 0.1
+    gamma: float = 0.9
+
+    # --- exploration ------------------------------------------------------
+    eps_start: float = 1.0
+    eps_end: float = 0.05
+    eps_decay_episodes: int = 2000
+
+    # --- action set -------------------------------------------------------
+    # On a board with no crates and no opponents a bomb can only kill its owner,
+    # so Task 1 can be run with BOMB removed. Phase 1 measures what that costs
+    # instead of assuming it.
+    allow_bomb: bool = True
+
+    # --- rewards ----------------------------------------------------------
+    reward_coin: float = 1.0
+    reward_invalid: float = -0.5
+    reward_step: float = -0.01
+    reward_wait: float = -0.05
+    reward_killed_self: float = -5.0
+
+    # --- bookkeeping ------------------------------------------------------
+    n_episodes: int = 1000
+    seed: int = 0
+    model_path: str = "model.pkl"
+    continue_from: str = None
+    log_path: str = None
+
+
+def load():
+    """Read the config named by TQ_CONFIG, falling back to the defaults."""
+    cfg = Config()
+    path = os.environ.get("TQ_CONFIG")
+    if not path:
+        return cfg
+    with open(path) as fh:
+        raw = json.load(fh)
+    known = {f.name for f in fields(Config)}
+    unknown = set(raw) - known
+    if unknown:
+        # A silently ignored key means an experiment that did not test what its
+        # name claims, which is worse than a crash.
+        raise KeyError("unknown config keys: %s" % sorted(unknown))
+    for key, value in raw.items():
+        setattr(cfg, key, value)
+    return cfg
