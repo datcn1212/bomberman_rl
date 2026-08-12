@@ -1,10 +1,12 @@
 """The Q table and the encoding that indexes it.
 
 The state is a tuple of small integers, so it maps onto a single table row by
-mixed-radix encoding. LAYOUT records the radix of every component; it is stored
-inside the pickle and checked on load, because changing the state definition
-while older models are still around otherwise fails silently -- every lookup
-misses, the agent still runs, and the numbers just quietly get worse.
+mixed-radix encoding. LAYOUT records the radix of every component and
+FEATURE_VERSION records the *meaning* of those components; both are stored
+inside the pickle and checked on load. The radix alone is not enough: a change
+that redefines what a value means without changing how many values there are
+would otherwise pass unnoticed, and every affected lookup would silently return
+a row trained for something else.
 """
 
 import pickle
@@ -13,24 +15,37 @@ import numpy as np
 
 from .features import ACTIONS, observe
 
-RADIX_MOVE = 16          # 4 neighbours, free or blocked
-RADIX_TARGET_DIR = 5     # none, up, right, down, left
+RADIX_MOVE = 81          # 4 neighbours x {blocked, free-safe, free-lethal}
+RADIX_T_HERE = 5         # steps until this tile burns; 0 = it does not
+RADIX_TARGET_DIR = 6     # none, 4 directions, or "already there"
+RADIX_TARGET_KIND = 3    # crate, coin, opponent
+RADIX_ESCAPE_DIR = 6     # none, 4 directions, or "staying put is safe"
 
-LAYOUT = (RADIX_MOVE, RADIX_TARGET_DIR)
+LAYOUT = (RADIX_MOVE, RADIX_T_HERE, RADIX_TARGET_DIR, RADIX_TARGET_KIND,
+          RADIX_ESCAPE_DIR)
+FEATURE_VERSION = 3
+
 N_STATES = int(np.prod(LAYOUT))
 N_ACTIONS = len(ACTIONS)
 
 
 def encode(obs):
     """Mixed-radix index of an Observation."""
-    move = (obs.move_status[0] | obs.move_status[1] << 1
-            | obs.move_status[2] << 2 | obs.move_status[3] << 3)
-    return move * RADIX_TARGET_DIR + obs.target_dir
+    move = 0
+    for i in range(4):
+        move = move * 3 + obs.move_status[i]
+    index = move
+    index = index * RADIX_T_HERE + obs.t_here
+    index = index * RADIX_TARGET_DIR + obs.target_dir
+    index = index * RADIX_TARGET_KIND + obs.target_kind
+    index = index * RADIX_ESCAPE_DIR + obs.escape_dir
+    return index
 
 
 class QModel:
     def __init__(self):
         self.layout = LAYOUT
+        self.feature_version = FEATURE_VERSION
         self.q = np.zeros((N_STATES, N_ACTIONS), dtype=np.float64)
         self.seen = np.zeros((N_STATES, N_ACTIONS), dtype=np.int64)
 
@@ -45,9 +60,9 @@ class QModel:
         """Step size for one update.
 
         With "visit" the step size decays as alpha / (1 + n/half_life), where n
-        counts updates of this (state, action) pair specifically. Pairs that are
-        rare keep learning fast while pairs seen tens of thousands of times
-        settle down, which a global decay schedule cannot do.
+        counts updates of this (state, action) pair specifically. Rare pairs keep
+        learning fast while pairs seen tens of thousands of times settle down,
+        which a global schedule cannot do.
         """
         if cfg.alpha_schedule == "constant":
             return cfg.alpha
@@ -64,11 +79,12 @@ class QModel:
     def load(path):
         with open(path, "rb") as fh:
             model = pickle.load(fh)
-        if getattr(model, "layout", None) != LAYOUT:
+        found = (getattr(model, "layout", None), getattr(model, "feature_version", None))
+        if found != (LAYOUT, FEATURE_VERSION):
             raise ValueError(
-                "model at %s was trained with layout %s but this code expects %s; "
-                "loading it would make every state lookup miss silently."
-                % (path, getattr(model, "layout", None), LAYOUT))
+                "model at %s was trained with layout/version %s but this code "
+                "expects %s; loading it would make every state lookup miss "
+                "silently." % (path, found, (LAYOUT, FEATURE_VERSION)))
         return model
 
 

@@ -25,9 +25,9 @@ from .model import state_of
 
 
 class Transition:
-    __slots__ = ("step", "state", "action", "reward", "next_state", "terminal", "coins")
+    __slots__ = ("step", "state", "action", "reward", "next_state", "terminal", "coins", "crates", "bombs")
 
-    def __init__(self, step, state, action, reward, next_state, terminal, coins):
+    def __init__(self, step, state, action, reward, next_state, terminal, coins, crates, bombs):
         self.step = step
         self.state = state
         self.action = action
@@ -35,6 +35,8 @@ class Transition:
         self.next_state = next_state
         self.terminal = terminal
         self.coins = coins
+        self.crates = crates
+        self.bombs = bombs
 
 
 def setup_training(self):
@@ -42,21 +44,35 @@ def setup_training(self):
     self.pending = None
     self.episode_reward = 0.0
     self.episode_coins = 0
+    self.episode_crates = 0
+    self.bombs_dropped = 0
     self.log_rows = []
 
 
 def reward_from(self, events):
-    """Map a step's events onto a scalar reward."""
+    """Map a step's events onto a scalar reward.
+
+    Crates and revealed coins are counted per occurrence, because one
+    well-placed bomb can destroy several at once and a flat bonus would make a
+    bomb that clears one crate worth as much as a bomb that clears four.
+    """
     cfg = self.cfg
     reward = cfg.reward_step
-    if e.COIN_COLLECTED in events:
-        reward += cfg.reward_coin
+    reward += cfg.reward_coin * events.count(e.COIN_COLLECTED)
+    reward += cfg.reward_crate * events.count(e.CRATE_DESTROYED)
+    reward += cfg.reward_coin_found * events.count(e.COIN_FOUND)
     if e.INVALID_ACTION in events:
         reward += cfg.reward_invalid
     if e.WAITED in events:
         reward += cfg.reward_wait
     if e.KILLED_SELF in events:
         reward += cfg.reward_killed_self
+    elif e.GOT_KILLED in events:
+        # KILLED_SELF always comes with GOT_KILLED; charging both would double
+        # the penalty for suicide relative to being killed by someone else.
+        reward += cfg.reward_got_killed
+    if e.SURVIVED_ROUND in events:
+        reward += cfg.reward_survived
     return reward
 
 
@@ -71,6 +87,8 @@ def _flush(self):
     # Counting on arrival is what makes a 50-coin board report 51 coins.
     self.episode_reward += t.reward
     self.episode_coins += t.coins
+    self.episode_crates += t.crates
+    self.bombs_dropped += t.bombs
     if t.terminal:
         target = t.reward
     else:
@@ -96,6 +114,8 @@ def game_events_occurred(self, old_game_state, self_action, new_game_state, even
         next_state=state_of(new_game_state),
         terminal=False,
         coins=events.count(e.COIN_COLLECTED),
+        crates=events.count(e.CRATE_DESTROYED),
+        bombs=events.count(e.BOMB_DROPPED),
     )
 
 
@@ -115,6 +135,8 @@ def end_of_round(self, last_game_state, last_action, events):
             next_state=None,
             terminal=True,
             coins=events.count(e.COIN_COLLECTED),
+            crates=events.count(e.CRATE_DESTROYED),
+            bombs=events.count(e.BOMB_DROPPED),
         )
         _flush(self)
 
@@ -124,6 +146,8 @@ def end_of_round(self, last_game_state, last_action, events):
 
     self.episode_reward = 0.0
     self.episode_coins = 0
+    self.episode_crates = 0
+    self.bombs_dropped = 0
 
     if self.episode >= self.cfg.n_episodes or self.episode % 500 == 0:
         self.model.save(self.cfg.model_path)
@@ -146,6 +170,8 @@ def _log_episode(self, last_game_state, events):
         "steps": last_game_state["step"] if last_game_state else 0,
         "score": last_game_state["self"][1] if last_game_state else 0,
         "coins": self.episode_coins,
+        "crates": self.episode_crates,
+        "bombs": self.bombs_dropped,
         "reward": round(self.episode_reward, 4),
         "epsilon": round(self.epsilon, 4),
         "killed_self": int(e.KILLED_SELF in events),

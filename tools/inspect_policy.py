@@ -18,18 +18,25 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from agent_code.tabular_q.features import ACTIONS  # noqa: E402
-from agent_code.tabular_q.model import (  # noqa: E402
-    RADIX_TARGET_DIR, QModel)
+from agent_code.tabular_q.model import LAYOUT, QModel  # noqa: E402
 
-DIR_NAMES = ["none", "UP", "RIGHT", "DOWN", "LEFT"]
+DIR_NAMES = ["none", "UP", "RIGHT", "DOWN", "LEFT", "here"]
+MOVE_NAMES = ["blocked", "safe", "lethal"]
+KIND_NAMES = ["crate", "coin", "opponent"]
 
 
 def decode(index):
-    """Inverse of model.encode: table row -> (move_status, target_dir)."""
-    target_dir = index % RADIX_TARGET_DIR
-    move = index // RADIX_TARGET_DIR
-    move_status = tuple((move >> i) & 1 for i in range(4))
-    return move_status, target_dir
+    """Inverse of model.encode: table row -> the feature tuple."""
+    parts = []
+    for radix in reversed(LAYOUT):
+        parts.append(index % radix)
+        index //= radix
+    move, t_here, target_dir, target_kind, escape_dir = reversed(parts)
+    move_status = []
+    for _ in range(4):
+        move_status.append(move % 3)
+        move //= 3
+    return tuple(reversed(move_status)), t_here, target_dir, target_kind, escape_dir
 
 
 def main():
@@ -45,37 +52,34 @@ def main():
     print("visited states: %d of %d"
           % (np.count_nonzero(model.seen.sum(axis=1)), model.q.shape[0]))
     print()
-    print("| state | free U,R,D,L | coin dir | greedy | margin | visits | agrees |")
-    print("|---|---|---|---|---|---|---|")
+    print("| state | U,R,D,L | t_here | target | kind | escape | greedy | margin | visits | flag |")
+    print("|---|---|---|---|---|---|---|---|---|---|")
 
     disagree = 0
     for index in range(model.q.shape[0]):
         visits = int(model.seen[index].sum())
         if args.only_reachable and visits == 0:
             continue
-        move_status, target_dir = decode(index)
+        move_status, t_here, target_dir, target_kind, escape_dir = decode(index)
         values = model.q[index][:args.legal]
         best = int(np.argmax(values))
         order = np.sort(values)[::-1]
         margin = float(order[0] - order[1]) if len(order) > 1 else float("nan")
 
-        # The minimal state makes the intended policy explicit: walk towards the
-        # nearest coin. Any state whose greedy action disagrees is a candidate
-        # explanation for a failure.
-        agrees = "-"
-        if target_dir != 0:
-            want = target_dir - 1
-            agrees = "yes" if best == want else "NO"
-            if best != want and visits > 0:
-                disagree += 1
+        # A state that offers an escape but whose greedy action walks into a
+        # tile that is about to burn is the failure worth finding.
+        flag = "-"
+        if escape_dir != 0 and best < 4 and move_status[best] == 2:
+            flag = "WALKS INTO BLAST"
+            disagree += 1
 
-        print("| %d | %d,%d,%d,%d | %s | %s | %.4f | %d | %s |"
-              % (index, move_status[0], move_status[1], move_status[2],
-                 move_status[3], DIR_NAMES[target_dir], ACTIONS[best],
-                 margin, visits, agrees))
+        print("| %d | %s | %d | %s | %s | %s | %s | %.4f | %d | %s |"
+              % (index, ",".join(MOVE_NAMES[m][0] for m in move_status), t_here,
+                 DIR_NAMES[target_dir], KIND_NAMES[target_kind],
+                 DIR_NAMES[escape_dir], ACTIONS[best], margin, visits, flag))
 
     print()
-    print("visited states whose greedy action is not the coin direction: %d" % disagree)
+    print("visited states whose greedy action steps into a lethal tile: %d" % disagree)
 
 
 if __name__ == "__main__":

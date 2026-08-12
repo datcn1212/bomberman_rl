@@ -20,7 +20,7 @@ class Config:
     # sum(alpha^2) < inf: the estimate never settles, it random-walks around the
     # true value forever. "visit" divides by the visit count of the individual
     # (state, action) pair, which satisfies it.
-    alpha_schedule: str = "constant"
+    alpha_schedule: str = "visit"
     alpha_half_life: float = 1000.0
 
     # --- exploration ------------------------------------------------------
@@ -35,11 +35,19 @@ class Config:
     allow_bomb: bool = True
 
     # --- rewards ----------------------------------------------------------
+    # The game's own score (1 per coin, 5 per kill) is far too sparse to learn
+    # from, so the reward is assembled from the per-step event list. Every weight
+    # is a config value, which makes a reward change an experiment rather than a
+    # code edit.
     reward_coin: float = 1.0
+    reward_crate: float = 0.3
+    reward_coin_found: float = 0.1
     reward_invalid: float = -0.5
     reward_step: float = -0.01
     reward_wait: float = -0.05
     reward_killed_self: float = -5.0
+    reward_got_killed: float = -5.0
+    reward_survived: float = 0.0
 
     # --- diagnostics ------------------------------------------------------
     # Index of one table row whose Q values are written to the training log each
