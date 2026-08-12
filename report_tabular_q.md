@@ -257,3 +257,109 @@ loses 82% of its score. Any conclusion drawn from a single seed here would have
 been wrong - in either direction.
 
 ---
+
+## 4. Phase 2 - step size
+
+**What and why.** Phase 1 produced a hypothesis, not a conclusion: the estimate
+is a random walk because the step size is constant, and the policy is decided by
+where the walk sits at the stopping time. That hypothesis makes two predictions
+that point in opposite directions, so the experiment can actually fail:
+
+* if the problem is *insufficient training*, then doubling the number of
+  episodes should reduce the failure rate;
+* if the problem is *non-convergence*, then doubling the number of episodes
+  should change nothing at all, while a step size satisfying the Robbins-Monro
+  conditions should fix it outright.
+
+Three configurations, **10 seeds each** (10 rather than 5, because the quantity
+being estimated is a failure *rate* and 5 seeds cannot distinguish 20% from 5%):
+
+| id | step size | episodes |
+|---|---|---|
+| `p2_const2k` | constant `alpha = 0.1` | 2000 |
+| `p2_const4k` | constant `alpha = 0.1` | 4000 |
+| `p2_visit2k` | `alpha / (1 + n(s,a)/1000)` | 2000 |
+
+The decaying schedule counts visits **per (state, action) pair**, not globally.
+That matters here: the corridor rows are updated ~80000 times while the rarest
+reachable rows are updated ~150 times, and a global schedule would either freeze
+the rare rows before they had learned anything or leave the common ones noisy.
+
+### 4.1 Result
+
+| config | mean coins | seeds broken | which seeds | spread |
+|---|---|---|---|---|
+| `p2_const2k` | 41.65 | 2 / 10 | 3, 9 | 42.31 |
+| `p2_const4k` | 48.72 | 1 / 10 | **4** | 12.82 |
+| `p2_visit2k` | **50.00** | **0 / 10** | - | **0.000** |
+
+Both predictions were tested and only one survived.
+
+Doubling the training did **not** fix the problem. The count went from 2/10 to
+1/10, which at n = 10 is not a distinguishable difference, but the informative
+part is not the count: **the set of failing seeds is completely disjoint**.
+Seeds 3 and 9, which failed at 2000 episodes, are both perfect at 4000; seed 4,
+perfect at 2000, fails at 4000 - and on state 36, a three-way junction rather
+than a corridor. More data did not make weak seeds stronger, it reshuffled which
+seed was unlucky. That is what a random walk does and what an estimator
+converging on insufficient data does not.
+
+The decaying step size, in contrast, solves Task 1 **exactly**, on every seed:
+50.000 coins with a between-seed spread of 0.000, and 123.9 steps per round.
+
+### 4.2 The mechanism, checked directly
+
+The per-episode trace of state 54 over the last 500 episodes, both schedules:
+
+| | constant alpha | visit-decay alpha |
+|---|---|---|
+| mean margin (range over seeds) | +0.307 to +0.368 | +0.293 to +0.321 |
+| sd of the margin | 0.170 to 0.208 | **0.020 to 0.041** |
+| sign changes in 500 episodes | 20 to 40 | **0, in all 10 seeds** |
+
+The mean is unchanged - both schedules learn the same preference - while the
+noise drops by roughly a factor of six and the sign of the decision stops
+flipping entirely. That is precisely the predicted mechanism, and it is
+measured rather than inferred from the score.
+
+### 4.3 Where the failures actually live
+
+Reading the tables directly shows that neither failing seed had more than one
+bad row, and that the two bad rows are the same situation on different axes:
+
+| run | seed | bad state | situation | greedy | margin |
+|---|---|---|---|---|---|
+| 2000 ep | 3 | 54 | horizontal corridor, coin LEFT | RIGHT | -0.0112 |
+| 2000 ep | 9 | 28 | vertical corridor, coin DOWN | UP | -0.0581 |
+| 4000 ep | 4 | 36 | junction (U+R+D free), coin UP | RIGHT | - |
+
+Grouping every reachable row of all 10 constant-alpha seeds by its local
+geometry explains why those two:
+
+| state group | rows | median margin | smallest margin |
+|---|---|---|---|
+| **straight corridor** (only U+D or only L+R free) | 40 | **0.371** | **0.011** |
+| corner (2 open, perpendicular) | 80 | 0.879 | 0.312 |
+| 3 open | 120 | 0.689 | 0.132 |
+| 4 open | 40 | 0.570 | 0.208 |
+
+Straight corridors carry roughly **half the decision margin** of any other
+geometry and contain the smallest margin in the whole table - which is why two
+of the three observed failures landed there, though seed 4's junction failure
+shows the noise can flip any row that happens to be close. The reason is
+aliasing in the minimal encoding: in a straight corridor, stepping away from the
+target lands on a tile with the *identical* encoding - still a corridor, still
+the same target direction - so the value of the wrong action bootstraps from
+almost the same successor value as the right one. Everywhere else the wrong
+actions lead somewhere visibly different. The state simply does not contain the
+distance that would separate them.
+
+So the noise was only half the story. The failure needs a small *true* margin
+**and** a large estimation noise at the same time, and the state encoding
+supplies the first while the step size supplies the second. Phase 2 removes the
+noise; the narrow margin is a property of the encoding and is revisited later
+with potential-based shaping.
+
+**Decision.** `alpha_schedule = "visit"` from here on.
+
+---

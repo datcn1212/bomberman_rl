@@ -1,0 +1,9 @@
+{
+  "allow_bomb": false,
+  "alpha_half_life": 1000.0,
+  "alpha_schedule": "visit",
+  "continue_from": null,
+  "log_path": null,
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p2_visit2k/seed1/model.pkl",
+  "trace_state": 54
+}
