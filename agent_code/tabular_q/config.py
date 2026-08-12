@@ -34,6 +34,12 @@ class Config:
     # instead of assuming it.
     allow_bomb: bool = True
 
+    # Off by default. Phase 5 measured that this component carries no
+    # information in the states where the bombing decision is made, while
+    # fragmenting the travelling states by 25% -- which costs the movement
+    # policy far more than the bombing policy gains.
+    use_bomb_opt: bool = False
+
     # --- rewards ----------------------------------------------------------
     # The game's own score (1 per coin, 5 per kill) is far too sparse to learn
     # from, so the reward is assembled from the per-step event list. Every weight
@@ -42,6 +48,11 @@ class Config:
     reward_coin: float = 1.0
     reward_crate: float = 0.3
     reward_coin_found: float = 0.1
+    # Charged the moment a bomb is dropped whose blast covers no crate. Phase 4
+    # measured why this is needed: the crate reward arrives four steps later, by
+    # which point the trajectories of a good bomb and a useless one have merged,
+    # so the delayed signal cannot be attributed back to the decision.
+    reward_bomb_wasted: float = 0.0
     reward_invalid: float = -0.5
     reward_step: float = -0.01
     reward_wait: float = -0.05

@@ -44,6 +44,13 @@ KIND_CRATE, KIND_COIN = 0, 1
 # clears four crates from one that clears none.
 BOMB_NONE, BOMB_POINTLESS, BOMB_USEFUL, BOMB_TRAPPED = 0, 1, 2, 3
 
+# Which optional state components are switched on. Set once at setup and stored
+# inside the model, so that a model is always evaluated with the same
+# observation it was trained on. Holding a component at a constant value
+# collapses it out of the encoding without changing LAYOUT, which is what makes
+# a clean ablation possible.
+FLAGS = {"use_bomb_opt": False}
+
 
 def blast_tiles(field, x, y):
     """Tiles a bomb at (x, y) would burn: straight rays stopped by walls.
@@ -287,7 +294,8 @@ def observe(game_state):
         target_dir=target_dir,
         target_kind=target_kind,
         escape_dir=board.escape_search(),
-        bomb_opt=bomb_option(game_state, board),
+        bomb_opt=(bomb_option(game_state, board)
+                  if FLAGS["use_bomb_opt"] else BOMB_NONE),
         target_dist=target_dist,
         pos=board.pos,
     )

@@ -17,8 +17,16 @@ sys.path.insert(0, str(ROOT))
 import settings as s  # noqa: E402
 from agent_code.tabular_q.features import (  # noqa: E402
     BLOCKED, BOMB_NONE, BOMB_POINTLESS, BOMB_TRAPPED, BOMB_USEFUL, DIR_HERE,
-    DIR_NONE, FREE_LETHAL, FREE_SAFE, HORIZON, Board, blast_tiles,
+    DIR_NONE, FLAGS, FREE_LETHAL, FREE_SAFE, HORIZON, Board, blast_tiles,
     danger_schedule, observe)
+
+
+@pytest.fixture
+def bomb_opt_on():
+    """bomb_opt is off by default (Phase 5); these tests exercise the computation."""
+    FLAGS["use_bomb_opt"] = True
+    yield
+    FLAGS["use_bomb_opt"] = False
 
 
 def open_field(w=9, h=9):
@@ -155,7 +163,7 @@ def test_t_here_counts_down_to_the_blast():
     assert observe(make_state(field, (4, 4))).t_here == 0
 
 
-def test_bomb_option_none_without_a_bomb():
+def test_bomb_option_none_without_a_bomb(bomb_opt_on):
     field = open_field()
     field[5, 4] = 1
     state = make_state(field, (4, 4))
@@ -163,7 +171,7 @@ def test_bomb_option_none_without_a_bomb():
     assert observe(state).bomb_opt == BOMB_NONE
 
 
-def test_bomb_option_pointless_when_nothing_is_in_range():
+def test_bomb_option_pointless_when_nothing_is_in_range(bomb_opt_on):
     """The gap Phase 3 exposed: adjacent to a crate diagonally is not in range."""
     field = open_field()
     field[5, 5] = 1                              # crate on the diagonal
@@ -171,14 +179,14 @@ def test_bomb_option_pointless_when_nothing_is_in_range():
     assert obs.bomb_opt == BOMB_POINTLESS
 
 
-def test_bomb_option_useful_when_a_crate_is_in_range_and_escape_exists():
+def test_bomb_option_useful_when_a_crate_is_in_range_and_escape_exists(bomb_opt_on):
     field = open_field()
     field[5, 4] = 1
     obs = observe(make_state(field, (4, 4)))
     assert obs.bomb_opt == BOMB_USEFUL
 
 
-def test_bomb_option_trapped_in_a_dead_end():
+def test_bomb_option_trapped_in_a_dead_end(bomb_opt_on):
     """Bombing at the end of a short dead end leaves nowhere to run."""
     field = open_field(11, 11)
     field[:, 1] = -1

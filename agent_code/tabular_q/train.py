@@ -20,7 +20,8 @@ import numpy as np
 
 import events as e
 
-from .features import ACTIONS
+from . import features
+from .features import ACTIONS, Board
 from .model import state_of
 
 
@@ -40,6 +41,7 @@ class Transition:
 
 
 def setup_training(self):
+    self.model.feature_flags = dict(features.FLAGS)
     self.episode = 0
     self.pending = None
     self.episode_reward = 0.0
@@ -49,7 +51,19 @@ def setup_training(self):
     self.log_rows = []
 
 
-def reward_from(self, events):
+def _wasted_bomb(old_game_state, events):
+    """True when the agent dropped a bomb whose blast covers no crate.
+
+    Evaluated on the state the bomb was dropped from, so the penalty lands on
+    the transition that made the decision rather than four steps later, where
+    Phase 4 showed it cannot be attributed.
+    """
+    if e.BOMB_DROPPED not in events:
+        return False
+    return Board(old_game_state).bomb_payload() == 0
+
+
+def reward_from(self, events, old_game_state=None):
     """Map a step's events onto a scalar reward.
 
     Crates and revealed coins are counted per occurrence, because one
@@ -73,6 +87,8 @@ def reward_from(self, events):
         reward += cfg.reward_got_killed
     if e.SURVIVED_ROUND in events:
         reward += cfg.reward_survived
+    if old_game_state is not None and _wasted_bomb(old_game_state, events):
+        reward += cfg.reward_bomb_wasted
     return reward
 
 
@@ -110,7 +126,7 @@ def game_events_occurred(self, old_game_state, self_action, new_game_state, even
         step=old_game_state["step"],
         state=state_of(old_game_state),
         action=ACTIONS.index(self_action),
-        reward=reward_from(self, events),
+        reward=reward_from(self, events, old_game_state),
         next_state=state_of(new_game_state),
         terminal=False,
         coins=events.count(e.COIN_COLLECTED),
@@ -131,7 +147,7 @@ def end_of_round(self, last_game_state, last_action, events):
             step=last_game_state["step"],
             state=state_of(last_game_state),
             action=ACTIONS.index(last_action),
-            reward=reward_from(self, events),
+            reward=reward_from(self, events, last_game_state),
             next_state=None,
             terminal=True,
             coins=events.count(e.COIN_COLLECTED),

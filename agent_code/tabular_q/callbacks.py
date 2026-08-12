@@ -10,6 +10,7 @@ import os
 import numpy as np
 
 from . import config
+from . import features
 from .features import ACTIONS
 from .model import QModel, state_of
 
@@ -24,6 +25,11 @@ def setup(self):
     n = len(ACTIONS) if self.cfg.allow_bomb else ACTIONS.index("BOMB")
     self.legal = np.arange(n)
     self.bomb_log = os.environ.get("TQ_BOMBLOG")
+    self.obs_log = os.environ.get("TQ_OBSLOG")
+
+    # The observation must match the one the model was trained with, so at play
+    # time the model's own record wins over whatever the config happens to say.
+    features.FLAGS["use_bomb_opt"] = self.cfg.use_bomb_opt
 
     # Training either continues an explicit checkpoint or starts empty. Playing
     # reads `model_path`, which defaults to the file shipped next to this one;
@@ -31,7 +37,10 @@ def setup(self):
     source = self.cfg.continue_from if self.train else self.cfg.model_path
     if source and os.path.isfile(source):
         self.model = QModel.load(source)
-        self.logger.info("loaded model from %s", source)
+        stored = getattr(self.model, "feature_flags", None)
+        if stored:
+            features.FLAGS.update(stored)
+        self.logger.info("loaded model from %s (flags %s)", source, features.FLAGS)
     elif self.train:
         self.model = QModel()
         self.logger.info("starting from an empty table")
@@ -52,6 +61,8 @@ def act(self, game_state):
 
     if self.bomb_log is not None:
         _record_bomb(self, game_state, action)
+    if self.obs_log is not None:
+        _record_observation(self, game_state)
 
     self.last_state = state
     self.last_action = action
@@ -83,3 +94,19 @@ def greedy(rng, values):
     """
     best = np.flatnonzero(values == values.max())
     return int(best[0]) if len(best) == 1 else int(rng.choice(best))
+
+
+def _record_observation(self, game_state):
+    """Diagnostic: dump the full feature tuple of every step visited.
+
+    Off unless TQ_OBSLOG is set. Used to ask whether a state component carries
+    information the others do not already imply.
+    """
+    from .features import Board, bomb_option, observe
+    obs = observe(game_state)
+    # bomb_option is computed directly rather than read off the observation, so
+    # the true value is recorded even when the ablation switch holds it constant.
+    true_bomb_opt = bomb_option(game_state, Board(game_state))
+    with open(self.obs_log, "a") as fh:
+        fh.write("%d,%d,%d,%d,%d\n" % (obs.target_dir, obs.target_kind,
+                                       true_bomb_opt, obs.escape_dir, obs.t_here))

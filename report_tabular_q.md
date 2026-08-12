@@ -581,3 +581,98 @@ distinction the agent can see but is never paid to act on is not a distinction
 it will learn. Phase 5 attaches the missing consequence.
 
 ---
+
+## 7. Phase 5 - paying for the distinction, and finding the real cause
+
+**What and why.** Phase 4 diagnosed a missing immediate consequence for a
+useless bomb, so one was added: `reward_bomb_wasted`, charged the moment a bomb
+is dropped whose blast covers no crate. It is evaluated on the state the bomb
+was dropped *from*, which puts it on the transition that made the decision.
+
+The size of that penalty is itself a hypothesis, so instead of picking one value
+it was run as a **dose-response**: three magnitudes, 5 seeds each, everything
+else identical to Phase 4.
+
+### 7.1 Result: the direction is right, the level is not
+
+| penalty | coins | crates | bombs | suicide | wasted bombs |
+|---|---|---|---|---|---|
+| 0.0 (Phase 4) | 6.29 | 24.30 | 33.45 | 0.263 | 77% |
+| -0.1 | 9.04 | 32.07 | 35.77 | 0.227 | |
+| **-0.3** | **15.15** | **49.26** | 37.34 | **0.178** | **48%** |
+| -0.6 | 14.24 | 48.07 | 21.55 | 0.264 | |
+
+The response is monotone up to -0.3 and then turns over: at -0.6 the agent stops
+bombing (37.3 to 21.6 per round) and the suicide rate climbs back. That is the
+familiar shape of a penalty that cures the symptom by suppressing the behaviour.
+
+But the honest comparison is not against Phase 4. It is against **Phase 3**,
+which scored **20.21 coins at a 0.030 suicide rate with 11% wasted bombs** and
+had neither the feature nor the penalty. Reporting "6.29 to 15.15, a 2.4x
+improvement" would be arithmetically true and scientifically wrong.
+
+### 7.2 The controlled experiment that should have come first
+
+Between Phase 3 and Phase 4 **two** things changed: `bomb_opt` was added, *and*
+the dense table was replaced by a sparse dictionary. Attributing the regression
+to either one was not possible. That was an experimental design error, and it
+was fixed by adding an ablation switch that holds `bomb_opt` at a constant, so
+the encoding collapses to exactly the Phase 3 partition while every other line of
+code, including the sparse table, stays in place.
+
+| run | coins | suicide | crates |
+|---|---|---|---|
+| Phase 3 (dense table, no `bomb_opt`) | 20.213 | 0.030 | 62.549 |
+| `p5_ablate_nobombopt` (**sparse** table, no `bomb_opt`) | **20.213** | **0.030** | **62.549** |
+
+Identical to three decimals, and identical seed by seed (22.010, 24.750, 10.245,
+14.332, 29.728). So the sparse table is exactly equivalent, and **`bomb_opt`
+alone accounts for the entire regression**.
+
+### 7.3 Why the feature hurts
+
+With the ablation switch it is possible to log what `bomb_opt` *would* have been
+at every step the working Phase 3 policy visits, without that value influencing
+anything (11990 steps):
+
+| situation | share of steps | `NONE` | `POINTLESS` | `USEFUL` | `TRAPPED` |
+|---|---|---|---|---|---|
+| **standing next to a crate** | 22.9% | 48.2% | **0.0%** | 51.8% | **0.0%** |
+| travelling | 77.1% | 34.6% | 40.9% | 24.2% | 0.3% |
+
+In the states where the bombing decision is actually made - standing next to a
+crate - `bomb_opt` takes only two values, and both are already implied by the
+rest of the state. An orthogonally adjacent crate is *always* inside the blast,
+so "next to a crate" already means the bomb is useful; the only other case is
+that no bomb is available, which follows from having bombed in the last seven
+steps. **The feature carries no information where the decision is taken.**
+
+Its variation lives entirely in the 77% of steps where the agent is travelling -
+and there, bombing is not what the agent should be doing. So the component
+splits the largest part of the state space along a dimension irrelevant to the
+choice being made there:
+
+| | rows for "next to a crate" | rows for "travelling" |
+|---|---|---|
+| without `bomb_opt` | 161 | 467 |
+| with `bomb_opt` | 168 (**+4%**) | 582 (**+25%**) |
+
+The fragmentation lands almost entirely on the **movement** policy - the part
+that finds targets and dodges blasts - while the bombing policy it was meant to
+improve gains almost nothing. That is the complete explanation for the pattern
+seen in Phase 4: coins fall because pathing degrades, and the suicide rate
+multiplies because blast avoidance now has to be relearned separately in each
+fragment of an otherwise identical geometric situation.
+
+**Decision.** `bomb_opt` is switched off (`use_bomb_opt = False`). The slot is
+kept in `LAYOUT` at a constant so that earlier models stay loadable and the
+component can be re-enabled if opponents later make self-trapping matter.
+
+**Comment.** The lesson generalises past this one feature. A tabular agent pays
+for every state component in *statistical resolution*, and that price is charged
+across the whole state space while the benefit is collected only in the states
+where the distinction changes the decision. A component is worth adding only
+when those two sets overlap. Checking that overlap costs one logging run and
+would have saved two full training rounds here.
+
+---

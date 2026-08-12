@@ -58,9 +58,12 @@ def encode(obs):
 
 
 class QModel:
-    def __init__(self):
+    def __init__(self, feature_flags=None):
         self.layout = LAYOUT
         self.feature_version = FEATURE_VERSION
+        # Recorded so a model can never be evaluated with a different
+        # observation than it was trained on.
+        self.feature_flags = dict(feature_flags or {})
         self.q = {}
         self.seen = {}
 
