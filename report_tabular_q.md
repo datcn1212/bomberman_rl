@@ -475,3 +475,109 @@ learning but a distinction the state cannot currently draw: whether dropping a
 bomb *here* accomplishes anything. That is Phase 4.
 
 ---
+
+## 6. Phase 4 - telling good bombs from useless ones (a failure)
+
+**What and why.** Phase 3 measured that 11% of bombs destroyed nothing, and that
+the state could not distinguish a blast covering four crates from one covering
+none. The obvious fix is to put that distinction into the state. A new component
+`bomb_opt` answers "what would dropping a bomb here achieve":
+
+| value | meaning |
+|---|---|
+| `BOMB_NONE` | no bomb available |
+| `BOMB_POINTLESS` | a bomb is available but its blast covers no crate |
+| `BOMB_USEFUL` | the blast covers at least one crate and an escape route exists |
+| `BOMB_TRAPPED` | the blast covers something, but nothing survives afterwards |
+
+The escape question is answered against the **hypothetical** danger schedule
+that already includes the bomb under consideration, which is the only way to
+know whether the agent would still have a way out after dropping it.
+
+Only the feature changed. Rewards, episodes, seeds and scenario are identical to
+Phase 3, so the comparison is clean.
+
+Adding the component also forced an engineering change. The table grew from
+43740 to 174960 addressable rows, but measurement showed only ~630 of the 43740
+were ever visited (1.4%) - most feature combinations are geometrically
+impossible. The dense array was spending 98.6% of a 4.2 MB pickle on zeros and
+would have spent 17 MB, so the table became a **sparse dictionary** keyed by row
+index.
+
+### 6.1 Result: substantially worse
+
+| metric | Phase 3 | Phase 4 | change |
+|---|---|---|---|
+| coins | 20.21 | **6.29** | -69% |
+| crates destroyed | 62.55 | 24.30 | -61% |
+| bombs dropped | 25.13 | 33.46 | +33% |
+| **suicide rate** | 0.030 | **0.263** | **x8.8** |
+| steps survived | 389.4 | 304.1 | -22% |
+
+Giving the agent exactly the information it was missing made it worse on every
+metric that matters. Repeating the bomb audit shows how completely the intent
+was inverted:
+
+| | bombs | hit 0 crates | mean payload | no escape |
+|---|---|---|---|---|
+| Phase 3 | 1405 | **11%** | 2.73 | 0 |
+| Phase 4 | 2134 | **77%** | 0.64 | 0 |
+
+The feature introduced to *stop* pointless bombs made them seven times more
+common.
+
+### 6.2 Diagnosis
+
+Two hypotheses were checked and rejected before the real one was found.
+
+*Data dilution* - a finer state partition spreads the same experience over more
+rows. Rejected by measurement: rows went from 628 to 750 (+19%, not the 4x a
+naive count suggests, because most combinations are unreachable) and the
+**median visits per row went up**, from 37 to 43.
+
+*Latency* - the feature runs a second breadth-first search per step, and
+evaluation enforces a 0.5 s timeout that training does not. Rejected: mean think
+time is 0.13-0.22 ms, three orders of magnitude below the limit.
+
+The answer came from grouping the learned table by `bomb_opt` and weighting each
+row by how often it was actually visited, rather than counting rows - a
+distinction that matters, because an unweighted count over rows gave a
+completely misleading picture first time round:
+
+| `bomb_opt` | share of visited time | share of that time where BOMB is greedy |
+|---|---|---|
+| `NONE` | 64.8% | **0.3%** |
+| `POINTLESS` | 12.4% | **55.7%** |
+| `USEFUL` | 20.2% | **51.0%** |
+| `TRAPPED` | 2.5% | **0.0%** |
+
+The agent bombs at essentially the **same rate whether the bomb is useful
+(51.0%) or pointless (55.7%)**. The information is in the state and it is being
+ignored. Meanwhile the other two categories are learned perfectly: it stops
+trying to bomb without a bomb (0.3%, and the invalid-action rate collapses from
+0.036 to 0.001), and it never bombs itself into a dead end (0.0%).
+
+That pattern is the whole answer. The agent learned exactly those distinctions
+the reward function **pays for**:
+
+* `BOMB_NONE` is enforced by `INVALID_ACTION`, worth -0.5 **immediately**;
+* `BOMB_TRAPPED` is enforced by death, worth -5;
+* `BOMB_POINTLESS` has **no corresponding penalty at all** - a bomb that
+  destroys nothing costs exactly the -0.01 of any other action.
+
+The crate reward does exist, but it arrives **four steps after the decision**,
+and in between the trajectories merge: once the bomb is on the ground,
+`bomb_opt` reads `NONE` whether the bomb was well placed or not, and the escape
+features describe the danger, not the payload. So the states following a good
+bomb and a useless bomb are **indistinguishable**, and the delayed reward lands
+where it can no longer be attributed to the choice that earned it. This is a
+credit-assignment failure caused by aliasing *after* the decision, not before
+it.
+
+**Comment.** The instructive part is that the feature was not wrong - it is used
+correctly in the two categories that carry an immediate consequence. What was
+wrong was the assumption that giving the agent information is enough. A
+distinction the agent can see but is never paid to act on is not a distinction
+it will learn. Phase 5 attaches the missing consequence.
+
+---

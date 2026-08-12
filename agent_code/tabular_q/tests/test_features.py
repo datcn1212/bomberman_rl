@@ -150,7 +150,7 @@ def test_encode_is_injective_on_its_components():
             for bombs in [(), (((4, 4), 2),), (((2, 2), 0),)]:
                 obs = observe(make_state(field, pos, coins, bombs))
                 key = (obs.move_status, obs.t_here, obs.target_dir,
-                       obs.target_kind, obs.escape_dir)
+                       obs.target_kind, obs.escape_dir, obs.bomb_opt)
                 index = encode(obs)
                 if index in seen:
                     assert seen[index] == key

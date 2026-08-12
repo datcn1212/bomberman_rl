@@ -176,7 +176,7 @@ def _log_episode(self, last_game_state, events):
         "epsilon": round(self.epsilon, 4),
         "killed_self": int(e.KILLED_SELF in events),
         "survived": int(e.SURVIVED_ROUND in events),
-        "states_visited": int(np.count_nonzero(self.model.seen.sum(axis=1))),
+        "states_visited": len(self.model),
         **trace,
     })
 

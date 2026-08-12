@@ -23,6 +23,7 @@ from agent_code.tabular_q.model import LAYOUT, QModel  # noqa: E402
 DIR_NAMES = ["none", "UP", "RIGHT", "DOWN", "LEFT", "here"]
 MOVE_NAMES = ["blocked", "safe", "lethal"]
 KIND_NAMES = ["crate", "coin", "opponent"]
+BOMB_NAMES = ["none", "pointless", "useful", "trapped"]
 
 
 def decode(index):
@@ -31,12 +32,13 @@ def decode(index):
     for radix in reversed(LAYOUT):
         parts.append(index % radix)
         index //= radix
-    move, t_here, target_dir, target_kind, escape_dir = reversed(parts)
+    move, t_here, target_dir, target_kind, escape_dir, bomb_opt = reversed(parts)
     move_status = []
     for _ in range(4):
         move_status.append(move % 3)
         move //= 3
-    return tuple(reversed(move_status)), t_here, target_dir, target_kind, escape_dir
+    return (tuple(reversed(move_status)), t_here, target_dir, target_kind,
+            escape_dir, bomb_opt)
 
 
 def main():
@@ -49,19 +51,16 @@ def main():
     args = p.parse_args()
 
     model = QModel.load(args.model)
-    print("visited states: %d of %d"
-          % (np.count_nonzero(model.seen.sum(axis=1)), model.q.shape[0]))
+    print("visited states: %d" % len(model))
     print()
-    print("| state | U,R,D,L | t_here | target | kind | escape | greedy | margin | visits | flag |")
-    print("|---|---|---|---|---|---|---|---|---|---|")
+    print("| state | U,R,D,L | t_here | target | kind | escape | bomb | greedy | margin | visits | flag |")
+    print("|---|---|---|---|---|---|---|---|---|---|---|")
 
     disagree = 0
-    for index in range(model.q.shape[0]):
-        visits = int(model.seen[index].sum())
-        if args.only_reachable and visits == 0:
-            continue
-        move_status, t_here, target_dir, target_kind, escape_dir = decode(index)
-        values = model.q[index][:args.legal]
+    for index in sorted(model.q):
+        visits = int(model.visits(index).sum())
+        move_status, t_here, target_dir, target_kind, escape_dir, bomb_opt = decode(index)
+        values = model.values(index)[:args.legal]
         best = int(np.argmax(values))
         order = np.sort(values)[::-1]
         margin = float(order[0] - order[1]) if len(order) > 1 else float("nan")
@@ -73,10 +72,11 @@ def main():
             flag = "WALKS INTO BLAST"
             disagree += 1
 
-        print("| %d | %s | %d | %s | %s | %s | %s | %.4f | %d | %s |"
+        print("| %d | %s | %d | %s | %s | %s | %s | %s | %.4f | %d | %s |"
               % (index, ",".join(MOVE_NAMES[m][0] for m in move_status), t_here,
                  DIR_NAMES[target_dir], KIND_NAMES[target_kind],
-                 DIR_NAMES[escape_dir], ACTIONS[best], margin, visits, flag))
+                 DIR_NAMES[escape_dir], BOMB_NAMES[bomb_opt], ACTIONS[best],
+                 margin, visits, flag))
 
     print()
     print("visited states whose greedy action steps into a lethal tile: %d" % disagree)

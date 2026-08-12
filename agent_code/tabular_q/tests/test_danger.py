@@ -16,8 +16,9 @@ sys.path.insert(0, str(ROOT))
 
 import settings as s  # noqa: E402
 from agent_code.tabular_q.features import (  # noqa: E402
-    BLOCKED, DIR_HERE, DIR_NONE, FREE_LETHAL, FREE_SAFE, HORIZON, Board,
-    blast_tiles, danger_schedule, observe)
+    BLOCKED, BOMB_NONE, BOMB_POINTLESS, BOMB_TRAPPED, BOMB_USEFUL, DIR_HERE,
+    DIR_NONE, FREE_LETHAL, FREE_SAFE, HORIZON, Board, blast_tiles,
+    danger_schedule, observe)
 
 
 def open_field(w=9, h=9):
@@ -152,6 +153,49 @@ def test_t_here_counts_down_to_the_blast():
         obs = observe(make_state(field, (4, 4), bombs=[((4, 4), timer)]))
         assert obs.t_here == expected, timer
     assert observe(make_state(field, (4, 4))).t_here == 0
+
+
+def test_bomb_option_none_without_a_bomb():
+    field = open_field()
+    field[5, 4] = 1
+    state = make_state(field, (4, 4))
+    state["self"] = ("me", 0, False, (4, 4))     # bombs_left = False
+    assert observe(state).bomb_opt == BOMB_NONE
+
+
+def test_bomb_option_pointless_when_nothing_is_in_range():
+    """The gap Phase 3 exposed: adjacent to a crate diagonally is not in range."""
+    field = open_field()
+    field[5, 5] = 1                              # crate on the diagonal
+    obs = observe(make_state(field, (4, 4)))
+    assert obs.bomb_opt == BOMB_POINTLESS
+
+
+def test_bomb_option_useful_when_a_crate_is_in_range_and_escape_exists():
+    field = open_field()
+    field[5, 4] = 1
+    obs = observe(make_state(field, (4, 4)))
+    assert obs.bomb_opt == BOMB_USEFUL
+
+
+def test_bomb_option_trapped_in_a_dead_end():
+    """Bombing at the end of a short dead end leaves nowhere to run."""
+    field = open_field(11, 11)
+    field[:, 1] = -1
+    field[:, 3] = -1
+    field[4:, 2] = -1                            # corridor is x = 1..3 only
+    field[3, 2] = 1                              # crate sealing the end
+    obs = observe(make_state(field, (2, 2)))
+    assert obs.bomb_opt == BOMB_TRAPPED
+
+
+def test_bomb_option_counts_crates_through_other_crates():
+    """A blast destroys every crate on its ray, not just the first."""
+    field = open_field(11, 11)
+    field[5, 4] = 1
+    field[6, 4] = 1
+    board = Board(make_state(field, (4, 4)))
+    assert board.bomb_payload() == 2
 
 
 if __name__ == "__main__":

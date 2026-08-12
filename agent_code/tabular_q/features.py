@@ -38,6 +38,12 @@ DIR_NONE, DIR_HERE = 0, 5
 # target_kind values
 KIND_CRATE, KIND_COIN = 0, 1
 
+# bomb_opt values: what dropping a bomb on this tile would accomplish.
+# Phase 3 measured that 11% of the agent's bombs destroyed nothing, with a
+# per-seed range of 0% to 28%, because the state could not tell a blast that
+# clears four crates from one that clears none.
+BOMB_NONE, BOMB_POINTLESS, BOMB_USEFUL, BOMB_TRAPPED = 0, 1, 2, 3
+
 
 def blast_tiles(field, x, y):
     """Tiles a bomb at (x, y) would burn: straight rays stopped by walls.
@@ -225,17 +231,35 @@ class Board:
 
 class Observation:
     __slots__ = ("move_status", "t_here", "target_dir", "target_kind",
-                 "escape_dir", "target_dist", "pos")
+                 "escape_dir", "bomb_opt", "target_dist", "pos")
 
     def __init__(self, move_status, t_here, target_dir, target_kind,
-                 escape_dir, target_dist, pos):
+                 escape_dir, bomb_opt, target_dist, pos):
         self.move_status = move_status
         self.t_here = t_here
         self.target_dir = target_dir
         self.target_kind = target_kind
         self.escape_dir = escape_dir
+        self.bomb_opt = bomb_opt
         self.target_dist = target_dist
         self.pos = pos
+
+
+def bomb_option(game_state, board):
+    """What dropping a bomb on the current tile would accomplish.
+
+    The escape question is answered against the *hypothetical* danger schedule
+    that includes the bomb being considered, which is the only way to know
+    whether the agent would still have a way out after dropping it.
+    """
+    if not game_state["self"][2]:
+        return BOMB_NONE
+    if board.bomb_payload() == 0:
+        return BOMB_POINTLESS
+    hypothetical = Board(game_state, extra_bomb=board.pos)
+    if hypothetical.escape_search() == DIR_NONE:
+        return BOMB_TRAPPED
+    return BOMB_USEFUL
 
 
 def crate_positions(field):
@@ -263,6 +287,7 @@ def observe(game_state):
         target_dir=target_dir,
         target_kind=target_kind,
         escape_dir=board.escape_search(),
+        bomb_opt=bomb_option(game_state, board),
         target_dist=target_dist,
         pos=board.pos,
     )
