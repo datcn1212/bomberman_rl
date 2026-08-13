@@ -43,10 +43,10 @@ def main():
         if not config_path.exists():
             print("skipping %s: no eval_config.json" % seed_dir.name)
             continue
-        metrics = evaluate("q_bomber", args.opponents, args.scenario, mode="exact",
+        metrics = evaluate("tabular_q", args.opponents, args.scenario, mode="exact",
                            seeds=EVAL_SEEDS, n_rounds=1,
                            tag="%s_%s_gate" % (args.exp, seed_dir.name),
-                           extra_env={"QB_CONFIG": str(config_path)}, workers=5)
+                           extra_env={"TQ_CONFIG": str(config_path)}, workers=5)
         print(format_metrics(metrics), flush=True)
         register(metrics, exp_id="%s_%s_exact" % (args.exp, seed_dir.name),
                  note=args.note)

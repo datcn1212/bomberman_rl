@@ -1,4 +1,4 @@
-"""Submission-readiness checks for agent_code/q_bomber.
+"""Submission-readiness checks for agent_code/tabular_q.
 
 Everything here is a rule the tournament enforces or a failure mode that has
 already cost this project time. Run from the repository root:
@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-AGENT_DIR = ROOT / "agent_code" / "q_bomber"
+AGENT_DIR = ROOT / "agent_code" / "tabular_q"
 RESULTS = []
 
 
@@ -36,21 +36,21 @@ def check_plays_like_the_tournament():
     every step, which looks like a bad policy rather than a crash."""
     proc = subprocess.run(
         [sys.executable, "main.py", "play", "--no-gui",
-         "--agents", "q_bomber", "random_agent", "random_agent", "random_agent",
+         "--agents", "tabular_q", "random_agent", "random_agent", "random_agent",
          "--n-rounds", "5", "--save-stats", "results/submission_check.json"],
         cwd=ROOT, capture_output=True, text=True)
     if proc.returncode != 0:
         return check("plays 4-agent game with errors unsilenced", False,
                      proc.stderr.strip().splitlines()[-1][:90] if proc.stderr else "")
     stats = json.loads((ROOT / "results" / "submission_check.json").read_text())
-    me = stats["by_agent"].get("q_bomber", {})
+    me = stats["by_agent"].get("tabular_q", {})
     return check("plays 4-agent game with errors unsilenced", True,
                  "score %s over %s rounds" % (me.get("score"), me.get("rounds")))
 
 
 def check_plays_against_rule_based():
     proc = subprocess.run(
-        [sys.executable, "main.py", "play", "--no-gui", "--my-agent", "q_bomber",
+        [sys.executable, "main.py", "play", "--no-gui", "--my-agent", "tabular_q",
          "--n-rounds", "5", "--save-stats", "results/submission_check_rb.json"],
         cwd=ROOT, capture_output=True, text=True)
     return check("plays --my-agent (vs three rule_based_agents)",
@@ -64,7 +64,7 @@ def check_think_time():
     """The penalty for overrunning is cumulative, so the maximum matters, not
     the mean. Measured from the framework's own per-step timing."""
     stats = json.loads((ROOT / "results" / "submission_check_rb.json").read_text())
-    me = stats["by_agent"]["q_bomber"]
+    me = stats["by_agent"]["tabular_q"]
     mean_ms = 1000.0 * me["time"] / max(1, me["steps"])
     proc = subprocess.run([sys.executable, "tools/benchmark_latency.py",
                            str(AGENT_DIR / "model.pkl")],
@@ -168,40 +168,44 @@ def check_imports_are_available():
 
 # --- 14.5 the model loads without depending on the working directory ---------
 
-def check_model_loads_from_anywhere():
+def check_model_loads_the_way_the_framework_loads_it():
+    """The framework chdir's into the agent folder before every event, so the
+    agent uses a relative path. This reproduces exactly that: cwd = agent dir,
+    no TQ_CONFIG set, load `model.pkl`."""
     model_path = AGENT_DIR / "model.pkl"
     if not model_path.exists():
-        return check("model.pkl present and loadable from any cwd", False, "missing")
+        return check("model.pkl loads with cwd = agent dir", False, "missing")
     script = (
         "import sys; sys.path.insert(0, %r)\n"
-        "from agent_code.q_bomber import config, model\n"
-        "cfg = config.load()\n"
-        "m = model.QModel.load(cfg.resolved_model_path)\n"
-        "print(m.kind, len(getattr(m, 'table', {})))\n" % str(ROOT))
-    proc = subprocess.run([sys.executable, "-c", script], cwd="/", capture_output=True,
-                          text=True, env={k: v for k, v in os.environ.items()
-                                          if k != "QB_CONFIG"})
-    return check("model.pkl present and loadable from any cwd", proc.returncode == 0,
-                 proc.stdout.strip() or proc.stderr.strip().splitlines()[-1][:80])
+        "from agent_code.tabular_q import model\n"
+        "m = model.QModel.load('model.pkl')\n"
+        "print('%%d rows, flags %%s' %% (len(m), m.feature_flags))\n" % str(ROOT))
+    proc = subprocess.run([sys.executable, "-c", script], cwd=str(AGENT_DIR),
+                          capture_output=True, text=True,
+                          env={k: v for k, v in os.environ.items() if k != "TQ_CONFIG"})
+    return check("model.pkl loads with cwd = agent dir", proc.returncode == 0,
+                 proc.stdout.strip() or proc.stderr.strip().splitlines()[-1][:90])
 
 
 def check_defaults_match_the_submitted_model():
-    """The tournament sets no QB_CONFIG, so config.DEFAULTS is what the agent
-    plays with. If the submitted model was trained with different feature flags,
-    it would be fed a state it has never seen -- silently."""
-    from agent_code.q_bomber import config, model
+    """The tournament sets no TQ_CONFIG, so the dataclass defaults are what the
+    agent plays with. A model trained with different feature flags would be fed
+    a state it has never seen -- and nothing would report it."""
+    from agent_code.tabular_q import config, model
     cfg = config.load()
-    trained = getattr(model.QModel.load(cfg.resolved_model_path), "feature_flags", None)
-    if trained is None:
+    trained = getattr(model.QModel.load(str(AGENT_DIR / "model.pkl")),
+                      "feature_flags", None)
+    if not trained:
         return check("defaults match the flags the model was trained with", False,
                      "model carries no feature_flags")
-    mismatch = {k: (v, cfg[k]) for k, v in trained.items() if cfg[k] != v}
+    mismatch = {k: (v, getattr(cfg, k, "<absent>"))
+                for k, v in trained.items() if getattr(cfg, k, None) != v}
     return check("defaults match the flags the model was trained with",
                  not mismatch, str(mismatch)[:90])
 
 
 def main():
-    print("Submission readiness for agent_code/q_bomber\n")
+    print("Submission readiness for agent_code/tabular_q\n")
     print("play:")
     check_plays_like_the_tournament()
     check_plays_against_rule_based()

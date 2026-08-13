@@ -20,8 +20,8 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 import settings as s  # noqa: E402
-from agent_code.q_bomber import model as qmodel  # noqa: E402
-from agent_code.q_bomber.features import observe  # noqa: E402
+from agent_code.tabular_q import model as qmodel  # noqa: E402
+from agent_code.tabular_q.features import observe  # noqa: E402
 
 
 def worst_case_states(n=400, seed=7):
@@ -72,24 +72,29 @@ def worst_case_states(n=400, seed=7):
     return states
 
 
+def lookup(q, obs, use_symmetry):
+    """Exactly what act() does after observe(): index the table, read the row."""
+    index = qmodel.canonical(obs)[0] if use_symmetry else qmodel.encode(obs)
+    return q.values(index)
+
+
 def main():
     states = worst_case_states()
-    q = qmodel.TabularQ()
+    q = qmodel.QModel()
     if len(sys.argv) > 1:
         q = qmodel.QModel.load(sys.argv[1])
+    use_symmetry = bool(getattr(q, "feature_flags", {}).get("use_symmetry", False))
 
     # Warm up so import and first-touch costs do not pollute the measurement.
     for st in states[:20]:
-        payload, _ = q.encode(observe(st))
-        q.q_values(payload)
+        lookup(q, observe(st), use_symmetry)
 
     feature_times, total_times = [], []
     for st in states:
         t0 = time.perf_counter()
         obs = observe(st)
         t1 = time.perf_counter()
-        payload, _ = q.encode(obs)
-        q.q_values(payload)
+        lookup(q, obs, use_symmetry)
         t2 = time.perf_counter()
         feature_times.append((t1 - t0) * 1000.0)
         total_times.append((t2 - t0) * 1000.0)
@@ -101,8 +106,8 @@ def main():
               f"p99 {p99:6.2f} ms   max {values[-1]:6.2f} ms   "
               f"({values[-1] / (s.TIMEOUT * 1000) * 100:.2f}% of the {s.TIMEOUT}s budget)")
 
-    print(f"worst-case boards: {len(states)}, model: {q.kind}, "
-          f"symmetry: {q.use_symmetry}")
+    print(f"worst-case boards: {len(states)}, model rows: {len(q)}, "
+          f"symmetry: {use_symmetry}")
     report("feature extraction", feature_times)
     report("full decision step", total_times)
     budget_ms = s.TIMEOUT * 1000
