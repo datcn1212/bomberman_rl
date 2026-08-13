@@ -21,8 +21,8 @@ import numpy as np
 import events as e
 
 from . import features
-from .features import ACTIONS, Board
-from .model import state_of
+from .features import ACTIONS, DIR_NONE, Board
+from .model import observe_and_encode
 
 
 class Transition:
@@ -49,6 +49,21 @@ def setup_training(self):
     self.episode_crates = 0
     self.bombs_dropped = 0
     self.log_rows = []
+
+
+def _potential(self, obs):
+    """Phi(s) = -w * distance to the nearest target.
+
+    Capped so that "no target reachable" and "target very far" are the same
+    value; an unbounded potential would make the shaping term jump whenever the
+    last coin on a board is collected.
+    """
+    if not self.cfg.shaping_weight:
+        return 0.0
+    dist = self.cfg.shaping_distance_cap
+    if obs.target_dir != DIR_NONE:
+        dist = min(obs.target_dist, self.cfg.shaping_distance_cap)
+    return -self.cfg.shaping_weight * dist
 
 
 def _wasted_bomb(old_game_state, events):
@@ -122,12 +137,15 @@ def game_events_occurred(self, old_game_state, self_action, new_game_state, even
     if old_game_state is None or self_action is None:
         return
     _flush(self)
+    old_index, old_obs = observe_and_encode(old_game_state)
+    new_index, new_obs = observe_and_encode(new_game_state)
+    shaping = (self.cfg.gamma * _potential(self, new_obs)) - _potential(self, old_obs)
     self.pending = Transition(
         step=old_game_state["step"],
-        state=state_of(old_game_state),
+        state=old_index,
         action=ACTIONS.index(self_action),
-        reward=reward_from(self, events, old_game_state),
-        next_state=state_of(new_game_state),
+        reward=reward_from(self, events, old_game_state) + shaping,
+        next_state=new_index,
         terminal=False,
         coins=events.count(e.COIN_COLLECTED),
         crates=events.count(e.CRATE_DESTROYED),
@@ -143,11 +161,14 @@ def end_of_round(self, last_game_state, last_action, events):
             self.pending = None
         else:
             _flush(self)
+        # Terminal transition: Ng et al. require Phi(terminal) = 0 for the
+        # policy-invariance guarantee, so the shaping term is just -Phi(s).
+        last_index, last_obs = observe_and_encode(last_game_state)
         self.pending = Transition(
             step=last_game_state["step"],
-            state=state_of(last_game_state),
+            state=last_index,
             action=ACTIONS.index(last_action),
-            reward=reward_from(self, events, last_game_state),
+            reward=reward_from(self, events, last_game_state) - _potential(self, last_obs),
             next_state=None,
             terminal=True,
             coins=events.count(e.COIN_COLLECTED),

@@ -24,6 +24,14 @@ class Config:
     alpha_half_life: float = 1000.0
 
     # --- exploration ------------------------------------------------------
+    # "epsilon": the exploratory action is drawn uniformly, so it is as likely
+    # to be the worst action as a plausible one.
+    # "max_boltzmann": the exploratory action is drawn from softmax(Q/tau), so
+    # exploration concentrates on actions the agent has reason to think are
+    # good. Phase 7 measured that under uniform exploration the agent learns
+    # almost nothing until epsilon has decayed, wasting most of the budget.
+    exploration: str = "epsilon"
+    temperature: float = 0.5
     eps_start: float = 1.0
     eps_end: float = 0.05
     eps_decay_episodes: int = 2000
@@ -59,6 +67,15 @@ class Config:
     reward_killed_self: float = -5.0
     reward_got_killed: float = -5.0
     reward_survived: float = 0.0
+
+    # --- potential-based shaping -----------------------------------------
+    # F(s, a, s') = gamma * Phi(s') - Phi(s) with Phi(s) = -w * distance to the
+    # nearest target. Ng et al. (1999) show this form leaves the optimal policy
+    # unchanged, which an ad-hoc "reward for stepping closer" bonus does not:
+    # that one can be farmed by oscillating towards and away from a target.
+    # Set to 0 to switch shaping off.
+    shaping_weight: float = 0.0
+    shaping_distance_cap: int = 15
 
     # --- diagnostics ------------------------------------------------------
     # Index of one table row whose Q values are written to the training log each

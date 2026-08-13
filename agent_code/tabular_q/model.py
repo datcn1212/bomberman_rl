@@ -123,3 +123,13 @@ class QModel:
 
 def state_of(game_state):
     return encode(observe(game_state))
+
+
+def observe_and_encode(game_state):
+    """Both the raw observation and its table index, from a single observe().
+
+    Reward shaping needs the observation itself, and observing twice per step
+    would double the cost of the two searches.
+    """
+    obs = observe(game_state)
+    return encode(obs), obs

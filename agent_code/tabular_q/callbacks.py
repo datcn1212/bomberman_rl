@@ -54,7 +54,7 @@ def act(self, game_state):
     values = self.model.values(state)[self.legal]
 
     if self.train and self.rng.random() < self.epsilon:
-        choice = int(self.rng.integers(len(self.legal)))
+        choice = explore(self, values)
     else:
         choice = greedy(self.rng, values)
     action = int(self.legal[choice])
@@ -83,6 +83,22 @@ def _record_bomb(self, game_state, action):
     with open(self.bomb_log, "a") as fh:
         fh.write("%d,%d,%d\n" % (game_state["step"], board.bomb_payload(),
                                  hypothetical.escape_search()))
+
+
+def explore(self, values):
+    """Pick an exploratory action."""
+    if self.cfg.exploration == "epsilon":
+        return int(self.rng.integers(len(values)))
+    if self.cfg.exploration == "max_boltzmann":
+        # Subtracting the max before exponentiating keeps this finite for large
+        # values; it cancels out of the normalised probabilities.
+        scaled = (values - values.max()) / max(self.cfg.temperature, 1e-6)
+        weights = np.exp(scaled)
+        total = weights.sum()
+        if not np.isfinite(total) or total <= 0:
+            return int(self.rng.integers(len(values)))
+        return int(self.rng.choice(len(values), p=weights / total))
+    raise ValueError("unknown exploration %r" % self.cfg.exploration)
 
 
 def greedy(rng, values):

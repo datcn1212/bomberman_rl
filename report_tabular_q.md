@@ -676,3 +676,114 @@ when those two sets overlap. Checking that overlap costs one logging run and
 would have saved two full training rounds here.
 
 ---
+
+## 8. Phase 6 - reward design on the confirmed encoding
+
+**What and why.** Two reward changes were tested on the encoding Phase 5
+confirmed, each independently, 5 seeds each:
+
+* **wasted-bomb penalty** without the redundant feature. Phase 5 could not
+  evaluate this fairly, because `bomb_opt` was degrading everything at the same
+  time.
+* **potential-based shaping**, `F(s, a, s') = gamma * Phi(s') - Phi(s)` with
+  `Phi(s) = -w *` (distance to the nearest target), capped. Ng et al. (1999)
+  prove this form leaves the optimal policy unchanged, which an ad-hoc "reward
+  for stepping closer" bonus does not - that one is farmable by oscillating
+  towards and away from a target. Terminal transitions use `Phi = 0`, as the
+  theorem requires.
+
+| config | coins | crates | suicide |
+|---|---|---|---|
+| baseline | 20.21 | 62.55 | 0.030 |
+| + wasted-bomb penalty -0.3 | **28.85** | 81.71 | 0.062 |
+| + shaping w = 0.05 | 20.59 | 63.02 | 0.120 |
+| + shaping w = 0.2 | 22.46 | 66.71 | 0.119 |
+
+**Potential-based shaping did not help.** Neither weight moved the score beyond
+noise, both roughly quadrupled the suicide rate, and w = 0.2 produced a seed
+range of 6.2 to 34.7. The theorem guarantees that the *optimal policy* is
+unchanged; it promises nothing about how fast the agent gets there, and here it
+did not help it get there at all.
+
+The wasted-bomb penalty looked like a large win, so it was taken to 10 seeds
+before being believed - and that is where the phase turns.
+
+---
+
+## 9. Phase 7 - the training budget, and a result of mine that did not survive
+
+**What and why.** At 5 seeds the wasted-bomb penalty gave +8.6 coins, a paired
+t of 2.62 - just under the bar this log set itself. Repeating with **10 seeds**
+gave a very different picture:
+
+| metric | baseline | + penalty | paired t (9 df) |
+|---|---|---|---|
+| coins | 22.99 | 27.06 | +1.70 (+4.07 +/- 2.40) |
+| crates | 68.86 | 77.57 | +1.60 |
+| suicide | 0.041 | 0.070 | +1.80 (**worse**) |
+
+Only 6 of 10 seeds improved. The effect halved, and the suicide rate moved
+against it. The first five seeds had simply been favourable.
+
+More importantly, the 10-seed data exposed something the 5-seed data hid: the
+baseline ranges from **10.2 to 31.5 coins across seeds**, a factor of three. No
+reward tweak worth four coins can be resolved against that, and an agent picked
+from that distribution is a lottery ticket. So the question changed from "which
+reward is better" to "why is the between-seed variance so large".
+
+The training curve answers it immediately:
+
+| episode block | coins per episode (mean of 10 seeds) |
+|---|---|
+| 0 - 500 | 0.0 |
+| 2000 - 2500 | 0.7 |
+| 3000 - 3500 | 9.8 |
+| 3500 - 4000 | **14.4** |
+
+The curve is still climbing steeply at the moment training stops. **Every reward
+comparison up to this point compared half-trained agents**, and the spread across
+seeds mostly measured where each seed happened to sit on a steep slope.
+
+### 9.1 Re-running at convergence
+
+12000 episodes, epsilon schedule scaled in proportion, 10 seeds, both reward
+variants:
+
+| config | coins | crates | suicide | seed range |
+|---|---|---|---|---|
+| 4000 ep, baseline | 22.99 | 68.86 | 0.041 | 10.2 - 31.5 |
+| 4000 ep, + penalty | 27.06 | 77.57 | 0.070 | 19.3 - 42.4 |
+| 12000 ep, baseline | 30.85 | 86.19 | 0.078 | 18.3 - 40.3 |
+| 12000 ep, + penalty | 31.55 | 87.06 | 0.048 | 19.8 - 44.3 |
+
+| comparison (paired, n = 10) | effect | t |
+|---|---|---|
+| training budget 4000 -> 12000 | **+7.86 +/- 3.46 coins** | **+2.27** |
+| wasted-bomb penalty, at 12000 ep | +0.70 +/- 3.67 coins | **+0.19** |
+
+The penalty is **worth nothing at convergence** - 5 of 10 seeds improved, which
+is exactly chance. Its apparent value at 4000 episodes was entirely an artifact
+of undertraining: it acts as a shortcut that partly substitutes for learning the
+crate reward properly, and once the agent has time to learn that reward the
+shortcut adds nothing.
+
+At 12000 episodes the curve has genuinely flattened (14.4, 15.9, 15.8 coins per
+episode over the last three blocks), so this is a converged comparison rather
+than another snapshot of a slope.
+
+**Decision.** `reward_bomb_wasted` stays at 0. The training budget moves to
+12000 episodes.
+
+**Comment.** This is the most useful negative result in the log, and it is a
+negative result about my own earlier conclusion. A shaping term that measurably
+helps an undertrained agent can be pure noise at convergence, so *the training
+budget has to be settled before any reward or hyperparameter comparison is
+worth running*. Had the phases been ordered that way, Phases 5 and 6 would have
+been one experiment instead of four.
+
+One further inefficiency is visible in the 12000-episode curve: the agent scores
+0.1 coins per episode at episode 3000 and 0.6 at episode 6000, then reaches 14.4
+by episode 9000. It learns almost nothing until epsilon has decayed - roughly
+half the budget is spent on uniform random play. That is the subject of Phase 8.
+
+---
