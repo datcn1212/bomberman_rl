@@ -787,3 +787,126 @@ by episode 9000. It learns almost nothing until epsilon has decayed - roughly
 half the budget is spent on uniform random play. That is the subject of Phase 8.
 
 ---
+
+## 10. Phase 8 - exploration
+
+**What and why.** Two independent ways to stop wasting half the budget on
+uniform random play: decay epsilon faster, or make the exploratory draw itself
+informed. **Max-Boltzmann** does the latter - with probability epsilon the
+action is sampled from `softmax(Q / tau)` instead of uniformly, so exploration
+concentrates on actions the agent has some reason to think are good.
+
+12000 episodes, 10 seeds each, `loot-crate`:
+
+| config | coins | suicide | seed range | paired t vs control |
+|---|---|---|---|---|
+| uniform, decay over 8000 | 30.85 | 0.078 | 18.3 - 40.3 | - |
+| uniform, decay over 2000 | 33.96 | 0.040 | 24.4 - 41.4 | +1.13 (+3.10) |
+| Max-Boltzmann, decay 8000 | 30.10 | 0.049 | 15.2 - 41.1 | **-0.26** |
+| Max-Boltzmann, decay 2000 | 31.71 | 0.038 | 20.9 - 44.8 | **+0.40** |
+
+**Max-Boltzmann gives nothing**, on either schedule. The expectation going in was
+that informed exploration must beat uniform sampling; the measurement says it
+does not, and the reason is visible in the earlier diagnosis - what limits this
+agent is not *which* exploratory action it picks but how long it spends
+exploring at all.
+
+Faster decay is directionally right on every metric (coins up, suicide halved,
+seed range narrower) but reaches only t = +1.13, so it is adopted as the better
+default without being claimed as a proven effect.
+
+### 10.1 Reference points
+
+Before optimising further, it is worth knowing how much room there is.
+`rule_based_agent`, solo, same protocol:
+
+| scenario | rule_based coins | our best | ratio |
+|---|---|---|---|
+| `loot-crate` | 43.08 (107.3 crates) | 33.96 (92.5 crates) | 79% |
+| `classic` | 8.48 of 9 (116.9 crates) | see Phase 9 | |
+
+---
+
+## 11. Phase 9 - `classic`, and a curriculum that does not help
+
+**What and why.** `loot-crate` was a stepping stone: same crate density as the
+real board but 50 coins instead of 9, so the reward signal is far denser.
+`classic` is the actual Task 2 board. Two arms, 12000 episodes total each so the
+budget is matched: training on `classic` directly, versus `loot-crate` for 6000
+episodes then `classic` for 6000 (with epsilon restarted at 0.3 rather than 1.0
+in the second phase - restarting at 1.0 throws away the model just learned).
+
+| config | coins | crates | bombs | suicide |
+|---|---|---|---|---|
+| `classic` only | 1.54 | 30.57 | 20.37 | 0.065 |
+| `loot-crate` -> `classic` | 1.73 | 32.58 | 19.14 | 0.158 |
+| *reference* `rule_based_agent` | *8.48* | *116.9* | *37.9* | *0.000* |
+
+**The curriculum does nothing**: +0.199 +/- 0.430 coins, t = +0.46, 4 of 10
+seeds better. And both arms are at roughly **18% of the reference**, against 79%
+on `loot-crate`.
+
+### 11.1 Diagnosis: the agent stops moving
+
+Coins on `classic` are almost a deterministic function of crates destroyed - the
+9 coins are hidden under ~130 crates, so destroying 23% of them should yield
+about 2.1 coins and the agent scores 1.54. It collects nearly every coin it
+uncovers. **The entire gap is the rate of crate destruction.**
+
+That is strange, because on `loot-crate` the same agent achieved 3.3 crates per
+bomb, matching `rule_based_agent`, while on `classic` - identical crate density,
+identical board geometry - it manages 1.50. Logging the position of every step
+explains it:
+
+| | distinct tiles visited per round | bounding-box span |
+|---|---|---|
+| `loot-crate` | **104.4** | 25.0 |
+| `classic` | **18.3** | 8.4 |
+
+The agent barely moves. It stays in a pocket of about 18 tiles on a 17x17 board,
+re-bombing an area it has already cleared. Its target is 2 steps away in both
+scenarios, so it never runs out of things to aim at locally - it simply never
+travels.
+
+---
+
+## 12. Phase 10 - the discount factor
+
+**What and why.** The coverage measurement points at a parameter that had never
+been touched in nine phases: `gamma = 0.9` gives an effective horizon of about
+ten steps (`0.9^10 = 0.35`), while crossing the board takes twenty to thirty.
+**Half the board is invisible to the value function.** On `loot-crate` that never
+showed, because with 50 coins scattered about there is always a reward inside
+ten steps.
+
+`classic`, 12000 episodes, 10 seeds:
+
+| gamma | coins | crates | bombs | suicide | paired t vs 0.9 |
+|---|---|---|---|---|---|
+| 0.90 | 1.54 | 30.57 | 20.37 | 0.065 | - |
+| 0.95 | 2.70 | 45.65 | 27.36 | 0.073 | +1.81 (7/10 better) |
+| **0.99** | **4.86** | **76.86** | 34.91 | 0.055 | **+5.24 (9/10 better)** |
+
+This is the **largest single improvement in the whole log**: the score more than
+triples, crates destroyed grow 2.5x, and the effect is unambiguous at t = 5.24.
+
+The mechanism was confirmed rather than assumed by repeating the coverage
+measurement:
+
+| | distinct tiles per round | span |
+|---|---|---|
+| `classic`, gamma 0.90 | 18.3 | 8.4 |
+| `classic`, gamma 0.99 | **60.0** | **18.5** |
+| `loot-crate`, gamma 0.90 | 104.4 | 25.0 |
+
+Raising the discount alone moves the agent from an 18-tile pocket to 60 tiles of
+board, which is exactly what the diagnosis predicted.
+
+**Comment.** This also explains why the curriculum failed. A curriculum
+transfers *skill* from an easy board to a hard one, but the deficiency was not
+skill - it was the horizon of the value function, and that is a property of
+gamma, not of where the agent trained. Nine phases of feature and reward work
+moved the `classic` score less than one hyperparameter that had been left at its
+initial guess the whole time.
+
+---

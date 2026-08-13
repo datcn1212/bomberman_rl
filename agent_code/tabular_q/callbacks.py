@@ -124,5 +124,7 @@ def _record_observation(self, game_state):
     # the true value is recorded even when the ablation switch holds it constant.
     true_bomb_opt = bomb_option(game_state, Board(game_state))
     with open(self.obs_log, "a") as fh:
-        fh.write("%d,%d,%d,%d,%d\n" % (obs.target_dir, obs.target_kind,
-                                       true_bomb_opt, obs.escape_dir, obs.t_here))
+        fh.write("%d,%d,%d,%d,%d,%d,%d,%d,%d\n" % (
+            game_state["round"], game_state["step"], obs.pos[0], obs.pos[1],
+            obs.target_dir, obs.target_kind, true_bomb_opt, obs.target_dist,
+            len(game_state["coins"])))
