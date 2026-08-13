@@ -1,0 +1,8 @@
+{
+  "continue_from": null,
+  "eps_decay_episodes": 2000,
+  "exploration": "max_boltzmann",
+  "gamma": 0.99,
+  "log_path": null,
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p11_g99_boltz/seed1/model.pkl"
+}

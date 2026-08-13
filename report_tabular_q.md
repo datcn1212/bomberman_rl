@@ -71,7 +71,7 @@ effects being measured.
 | 9 | curriculum loot-crate -> classic | nothing (t=+0.46) | **rejected** |
 | 10 | gamma 0.9 -> 0.99 | classic score **x3.2** (t=5.24) | **kept** |
 | 11 | gamma 0.995 / 0.999, Max-Boltzmann retest | 0.999 best; Boltzmann now helps | see below |
-| 12 | D4 canonicalisation | ~3.9 rows per orbit, ~5x data per row | measuring |
+| 12 | D4 canonicalisation | **coins 5.91 -> 8.88 (t=4.96, 10/10)**, beats reference | **kept** |
 | 13 | combine the marginal effects | leave-one-out | running |
 
 ---
@@ -464,7 +464,48 @@ recovered action (`RIGHT` becomes `DOWN` after one clockwise turn).
 With `use_symmetry = False` the frame is the identity and the index is the plain
 encoding, so the two modes differ by exactly one lookup and the ablation is clean.
 
----
+### Result - the largest and cleanest win in the log
+
+`classic`, gamma 0.995, 12000 episodes, 10 seeds, paired:
+
+| | coins | crates | suicide | seed range |
+|---|---|---|---|---|
+| symmetry off | 5.91 | 90.14 | 0.047 | 2.4 - 8.0 |
+| **symmetry on** | **8.88** | **122.23** | **0.002** | **8.6 - 9.0** |
+| *reference `rule_based_agent`* | *8.48* | *116.9* | *0.000* | |
+
+| metric | paired diff | t | seeds better |
+|---|---|---|---|
+| coins | **+2.97 +/- 0.60** | **+4.96** | **10/10** |
+| crates | +32.10 +/- 7.09 | +4.53 | 10/10 |
+| suicide | -0.045 +/- 0.013 | -3.52 | 9/10 |
+
+The board holds 9 coins and the agent collects **8.88**, with the best seeds at
+8.997. It **beats `rule_based_agent` (8.48)** on `classic` solo.
+
+The between-seed spread - the problem that had dominated every phase since
+Phase 3 - collapses from 2.4-8.0 to **8.6-9.0**. That is the direct consequence
+of the orbit measurement: each row now carries ~5x the experience, so rows stop
+being decided by noise.
+
+Side effects, all checked:
+
+| | before | after |
+|---|---|---|
+| table rows | ~660 | **174** |
+| pickle size | ~100 KB | **28 KB** |
+| think time | 0.13-0.22 ms | 0.15-0.22 ms |
+
+The extra work per step (eight relabellings and a `min`) costs nothing
+measurable against the 0.5 s limit.
+
+**Comment.** This was the one idea taken from the assignment's own list of
+"successful strategies", and it is the only change in the log that improved
+*every* seed. Worth noting why it works where added features failed: symmetry
+does not add information, it removes a *distinction the encoding was making
+without reason* - absolute direction. Phase 5's lesson was that a component
+costs resolution everywhere and pays only where it changes the decision;
+canonicalisation is the same trade run backwards, and it is free.
 
 ## Phase 13 - combining the marginal effects
 
