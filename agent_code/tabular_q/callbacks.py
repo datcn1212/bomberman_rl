@@ -12,7 +12,7 @@ import numpy as np
 from . import config
 from . import features
 from .features import ACTIONS
-from .model import QModel, state_of
+from .model import QModel, from_frame, observe_and_encode
 
 MODEL_FILE = "model.pkl"
 
@@ -30,6 +30,7 @@ def setup(self):
     # The observation must match the one the model was trained with, so at play
     # time the model's own record wins over whatever the config happens to say.
     features.FLAGS["use_bomb_opt"] = self.cfg.use_bomb_opt
+    self.use_symmetry = self.cfg.use_symmetry
 
     # Training either continues an explicit checkpoint or starts empty. Playing
     # reads `model_path`, which defaults to the file shipped next to this one;
@@ -37,7 +38,9 @@ def setup(self):
     source = self.cfg.continue_from if self.train else self.cfg.model_path
     if source and os.path.isfile(source):
         self.model = QModel.load(source)
-        stored = getattr(self.model, "feature_flags", None)
+        stored = dict(getattr(self.model, "feature_flags", None) or {})
+        if "use_symmetry" in stored:
+            self.cfg.use_symmetry = stored.pop("use_symmetry")
         if stored:
             features.FLAGS.update(stored)
         self.logger.info("loaded model from %s (flags %s)", source, features.FLAGS)
@@ -50,14 +53,17 @@ def setup(self):
 
 
 def act(self, game_state):
-    state = state_of(game_state)
+    # `perm` is the frame the row is written in: with symmetry on, the chosen
+    # action has to be translated back out of the canonical frame before it is
+    # returned to the game.
+    state, _, perm = observe_and_encode(game_state, self.cfg.use_symmetry)
     values = self.model.values(state)[self.legal]
 
     if self.train and self.rng.random() < self.epsilon:
         choice = explore(self, values)
     else:
         choice = greedy(self.rng, values)
-    action = int(self.legal[choice])
+    action = from_frame(perm, int(self.legal[choice]))
 
     if self.bomb_log is not None:
         _record_bomb(self, game_state, action)

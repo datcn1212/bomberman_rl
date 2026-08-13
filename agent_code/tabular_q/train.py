@@ -22,7 +22,7 @@ import events as e
 
 from . import features
 from .features import ACTIONS, DIR_NONE, Board
-from .model import observe_and_encode
+from .model import observe_and_encode, to_frame
 
 
 class Transition:
@@ -41,7 +41,10 @@ class Transition:
 
 
 def setup_training(self):
+    # Recorded on the model so it can never be evaluated with a different
+    # observation, or a different frame, than it was trained with.
     self.model.feature_flags = dict(features.FLAGS)
+    self.model.feature_flags["use_symmetry"] = self.cfg.use_symmetry
     self.episode = 0
     self.pending = None
     self.episode_reward = 0.0
@@ -137,13 +140,13 @@ def game_events_occurred(self, old_game_state, self_action, new_game_state, even
     if old_game_state is None or self_action is None:
         return
     _flush(self)
-    old_index, old_obs = observe_and_encode(old_game_state)
-    new_index, new_obs = observe_and_encode(new_game_state)
+    old_index, old_obs, old_perm = observe_and_encode(old_game_state, self.cfg.use_symmetry)
+    new_index, new_obs, _ = observe_and_encode(new_game_state, self.cfg.use_symmetry)
     shaping = (self.cfg.gamma * _potential(self, new_obs)) - _potential(self, old_obs)
     self.pending = Transition(
         step=old_game_state["step"],
         state=old_index,
-        action=ACTIONS.index(self_action),
+        action=to_frame(old_perm, ACTIONS.index(self_action)),
         reward=reward_from(self, events, old_game_state) + shaping,
         next_state=new_index,
         terminal=False,
@@ -163,11 +166,12 @@ def end_of_round(self, last_game_state, last_action, events):
             _flush(self)
         # Terminal transition: Ng et al. require Phi(terminal) = 0 for the
         # policy-invariance guarantee, so the shaping term is just -Phi(s).
-        last_index, last_obs = observe_and_encode(last_game_state)
+        last_index, last_obs, last_perm = observe_and_encode(
+            last_game_state, self.cfg.use_symmetry)
         self.pending = Transition(
             step=last_game_state["step"],
             state=last_index,
-            action=ACTIONS.index(last_action),
+            action=to_frame(last_perm, ACTIONS.index(last_action)),
             reward=reward_from(self, events, last_game_state) - _potential(self, last_obs),
             next_state=None,
             terminal=True,

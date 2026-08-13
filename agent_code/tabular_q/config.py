@@ -48,6 +48,12 @@ class Config:
     # policy far more than the bombing policy gains.
     use_bomb_opt: bool = False
 
+    # Fold each state onto the smallest member of its D4 orbit (four rotations
+    # x two reflections). Every feature is relative to the agent, so rotating
+    # the board is the same situation described in a different frame; without
+    # this, a horizontal and a vertical corridor are learned separately.
+    use_symmetry: bool = False
+
     # --- rewards ----------------------------------------------------------
     # The game's own score (1 per coin, 5 per kill) is far too sparse to learn
     # from, so the reward is assembled from the per-step event list. Every weight

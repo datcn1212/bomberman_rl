@@ -43,18 +43,103 @@ _UNSEEN_COUNTS = np.zeros(N_ACTIONS, dtype=np.int64)
 _UNSEEN_COUNTS.flags.writeable = False
 
 
-def encode(obs):
-    """Mixed-radix index of an Observation."""
+def encode_parts(move_status, t_here, target_dir, target_kind, escape_dir, bomb_opt):
+    """Mixed-radix index of a raw feature tuple."""
     move = 0
     for i in range(4):
-        move = move * 3 + obs.move_status[i]
+        move = move * 3 + move_status[i]
     index = move
-    index = index * RADIX_T_HERE + obs.t_here
-    index = index * RADIX_TARGET_DIR + obs.target_dir
-    index = index * RADIX_TARGET_KIND + obs.target_kind
-    index = index * RADIX_ESCAPE_DIR + obs.escape_dir
-    index = index * RADIX_BOMB_OPT + obs.bomb_opt
+    index = index * RADIX_T_HERE + t_here
+    index = index * RADIX_TARGET_DIR + target_dir
+    index = index * RADIX_TARGET_KIND + target_kind
+    index = index * RADIX_ESCAPE_DIR + escape_dir
+    index = index * RADIX_BOMB_OPT + bomb_opt
     return index
+
+
+def encode(obs):
+    return encode_parts(obs.move_status, obs.t_here, obs.target_dir,
+                        obs.target_kind, obs.escape_dir, obs.bomb_opt)
+
+
+# --- dihedral symmetry ----------------------------------------------------
+# The arena and the rules are symmetric under D4 (four rotations x two
+# reflections) and every feature is expressed relative to the agent, so a board
+# rotated by 90 degrees is the same situation. The encoding uses absolute
+# directions, though, so it lands on a different row: measured on a trained
+# model, ~660 visited rows collapse into ~171 orbits, and the median row is
+# updated 98 times where its orbit is updated 506 times.
+#
+# DIRS is (UP, RIGHT, DOWN, LEFT). A 90-degree clockwise rotation sends
+# (dx, dy) -> (-dy, dx), mapping index i to (i + 1) % 4. A mirror in the
+# vertical axis fixes UP and DOWN and swaps RIGHT and LEFT.
+_ROT = (1, 2, 3, 0)
+_MIRROR = (0, 3, 2, 1)
+
+
+def _compose(p, q):
+    return tuple(p[q[i]] for i in range(4))
+
+
+def _build_d4():
+    perms, rot = [], (0, 1, 2, 3)
+    for _ in range(4):
+        perms.append(rot)
+        perms.append(_compose(_MIRROR, rot))
+        rot = _compose(_ROT, rot)
+    return tuple(perms)
+
+
+D4 = _build_d4()
+
+
+def _relabel(perm, obs):
+    """Rewrite one observation's directions under a D4 element."""
+    status = [0] * 4
+    for i in range(4):
+        status[perm[i]] = obs.move_status[i]
+
+    def direction(value):
+        # DIR_NONE (0) and DIR_HERE (5) carry no direction.
+        return value if value in (0, 5) else perm[value - 1] + 1
+
+    return encode_parts(status, obs.t_here, direction(obs.target_dir),
+                        obs.target_kind, direction(obs.escape_dir), obs.bomb_opt)
+
+
+def canonical(obs):
+    """Smallest index in the observation's D4 orbit, and the element reaching it.
+
+    The permutation has to come back with the index: it relabels directions, so
+    the caller must translate between real move actions and the actions of the
+    canonical frame.
+    """
+    best_index, best_perm = None, None
+    for perm in D4:
+        index = _relabel(perm, obs)
+        if best_index is None or index < best_index:
+            best_index, best_perm = index, perm
+    return best_index, best_perm
+
+
+IDENTITY = (0, 1, 2, 3)
+
+
+def invert(perm):
+    inverse = [0] * 4
+    for i in range(4):
+        inverse[perm[i]] = i
+    return tuple(inverse)
+
+
+def to_frame(perm, action):
+    """Real action index -> its index in the canonical frame."""
+    return perm[action] if action < 4 else action
+
+
+def from_frame(perm, action):
+    """Canonical-frame action index -> the real action index."""
+    return invert(perm)[action] if action < 4 else action
 
 
 class QModel:
@@ -121,15 +206,14 @@ class QModel:
         return model
 
 
-def state_of(game_state):
-    return encode(observe(game_state))
+def observe_and_encode(game_state, use_symmetry):
+    """The observation, its table index, and the frame that index is written in.
 
-
-def observe_and_encode(game_state):
-    """Both the raw observation and its table index, from a single observe().
-
-    Reward shaping needs the observation itself, and observing twice per step
-    would double the cost of the two searches.
+    With symmetry off the frame is the identity and the index is the plain
+    encoding, so the two modes differ by exactly one lookup.
     """
     obs = observe(game_state)
-    return encode(obs), obs
+    if use_symmetry:
+        index, perm = canonical(obs)
+        return index, obs, perm
+    return encode(obs), obs, IDENTITY
