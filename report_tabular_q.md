@@ -70,6 +70,9 @@ effects being measured.
 | 8 | Max-Boltzmann exploration | nothing (t=-0.26 / +0.40) | **rejected** |
 | 9 | curriculum loot-crate -> classic | nothing (t=+0.46) | **rejected** |
 | 10 | gamma 0.9 -> 0.99 | classic score **x3.2** (t=5.24) | **kept** |
+| 11 | gamma 0.995 / 0.999, Max-Boltzmann retest | 0.999 best; Boltzmann now helps | see below |
+| 12 | D4 canonicalisation | ~3.9 rows per orbit, ~5x data per row | measuring |
+| 13 | combine the marginal effects | leave-one-out | running |
 
 ---
 
@@ -407,13 +410,80 @@ the agent trained.
 
 ---
 
+## Phase 11 - pushing gamma, and re-testing a rejected idea
+
+Phase 7 showed conclusions flip when a deeper parameter moves, so Max-Boltzmann
+was re-tested at the new gamma rather than left rejected.
+
+| config | coins | crates | suicide | t vs gamma 0.99 |
+|---|---|---|---|---|
+| gamma 0.99 | 4.86 | 76.86 | 0.055 | - |
+| gamma 0.995 | 5.91 | 90.14 | 0.047 | +1.18 (8/10) |
+| **gamma 0.999** | **6.26** | **94.15** | 0.044 | +1.75 (8/10) |
+| gamma 0.99 + Max-Boltzmann | 6.18 | 90.55 | **0.014** | +1.42 (7/10) |
+
+**Max-Boltzmann, rejected in Phase 8, now helps.** At gamma 0.9 on `loot-crate`
+it scored t = -0.26; at gamma 0.99 on `classic` it gives t = +1.42 and cuts
+suicide roughly 4x. Plausible reason: with a high discount, values propagate far
+enough that `softmax(Q/tau)` has real signal to sample from, whereas at gamma 0.9
+most Q values sit close together and the softmax degenerates towards uniform.
+
+> **General lesson (second time):** a rejected idea stays rejected only for the
+> setting it was tested in. Re-test the cheap ones after any change to a deeper
+> parameter.
+
+---
+
+## Phase 12 - dihedral symmetry
+
+The arena and the rules are symmetric under D4 (4 rotations x 2 reflections),
+and every feature is relative to the agent - but the encoding uses **absolute**
+directions, so the same situation rotated by 90 degrees lands on a different row.
+Measured on a trained table (`tools/analyse_symmetry.py`):
+
+| | value |
+|---|---|
+| visited rows | ~660 |
+| D4 orbits | ~171 |
+| **rows per orbit** | **3.87** |
+| median visits per row | 98 |
+| **median visits per orbit** | **506** |
+
+So roughly 5x the experience per row is available for free. The group action was
+verified before trusting the count: true orbit sizes come out as 1, 2, 4, 8 only,
+as orbit-stabiliser requires.
+
+Implementation: fold each state onto the **smallest index in its orbit**. The
+subtlety is that this relabels directions, so the agent looks up a row written in
+a canonical frame and the chosen action must be translated back - "UP" in the
+canonical frame may be LEFT on the board. Getting that wrong does not crash and
+does not look like a bug; the agent just runs the right policy in the wrong
+frame. Tests cover the round trip and check that rotating the board rotates the
+recovered action (`RIGHT` becomes `DOWN` after one clockwise turn).
+
+With `use_symmetry = False` the frame is the identity and the index is the plain
+encoding, so the two modes differ by exactly one lookup and the ablation is clean.
+
+---
+
+## Phase 13 - combining the marginal effects
+
+gamma 0.999, Max-Boltzmann and symmetry each land at t = 1.2-1.8 alone:
+individually inconclusive, all pointing the same way. Rather than tuning each
+until it crosses a threshold, they are tested **together** against the gamma-0.99
+baseline, with leave-one-out arms so the result is not credited to the wrong part.
+
+*(running)*
+
+---
+
 ## Settings currently in force
 
 ```
 alpha 0.1, alpha_schedule "visit", alpha_half_life 1000
-gamma 0.99
+gamma 0.999            (config default still says 0.9 - passed via overrides)
 exploration "epsilon", eps 1.0 -> 0.05 over 2000 episodes
-use_bomb_opt False, reward_bomb_wasted 0, shaping_weight 0
+use_bomb_opt False, use_symmetry (under test), reward_bomb_wasted 0, shaping_weight 0
 rewards: coin +1, crate +0.3, coin_found +0.1, invalid -0.5,
          wait -0.05, step -0.01, killed_self -5, got_killed -5
 budget: 12000 episodes on `classic`
@@ -426,7 +496,7 @@ Max-Boltzmann exploration - curriculum `loot-crate` -> `classic`.
 
 ## Open
 
-- gamma beyond 0.99 (0.995, 0.999 running), and re-testing exploration at the new
-  gamma, since Phase 7 showed conclusions flip when a deeper parameter moves.
+- Phase 13 combination result, then fold the winner into the config defaults.
 - Tasks 3-4: opponent features, training against `rule_based_agent`.
-- Final: hyperparameter search, latency benchmark, submission checks.
+- Final: hyperparameter search, latency benchmark, submission checks, ship
+  `model.pkl` next to the agent.
