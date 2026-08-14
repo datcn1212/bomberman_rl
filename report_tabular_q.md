@@ -59,7 +59,7 @@ effects being measured.
 
 | # | change | result | verdict |
 |---|---|---|---|
-| 0 | measure the environment before building | found 2 silent framework bugs | **kept** |
+| 0 | measure the environment before building | 2 delivery rules that shape the learner | **kept** |
 | 1 | minimal state, Task 1 | 4/5 seeds perfect, 1 broken | diagnosed |
 | 2 | visit-count step-size decay | 0/10 seeds broken, spread 0.000 | **kept** |
 | 3 | danger as a schedule, bombs on | plays Task 2, suicide 0.030 | **kept** |
@@ -100,8 +100,9 @@ flushed when the next arrives, and `end_of_round` either replaces it (same step 
 re-delivery) or flushes it first (different step = the agent died). Exactly one
 update per step either way.
 
-> Both are silent bugs - no crash, nothing visible in a training curve. Cheapest
-> phase in the log by value.
+> Neither rule is visible from the outside: a learner that ignores them still
+> runs and still produces a training curve, it just optimises a different problem.
+> Cheapest phase in the log by value.
 
 ---
 
@@ -302,8 +303,9 @@ The penalty looked like a big win, so it went to 10 seeds before being believed.
 
 ## Phase 7 - training budget
 
-At 10 seeds the penalty shrank to **+4.07 +/- 2.40 coins, t = +1.70**, only 6/10
-seeds better, with suicide moving *against* it. The 5-seed result was luck.
+At 10 seeds the penalty shrinks to **+4.07 +/- 2.40 coins, t = +1.70**, only 6/10
+seeds better, with suicide moving *against* it. The effect does not survive the
+larger sample, which is why the threshold in this log is 10 seeds and not 5.
 
 The 10-seed data exposed the real problem: baseline spans **10.2 to 31.5 coins**
 across seeds. The training curve says why -
