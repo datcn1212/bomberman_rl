@@ -44,12 +44,20 @@ KIND_CRATE, KIND_COIN = 0, 1
 # clears four crates from one that clears none.
 BOMB_NONE, BOMB_POINTLESS, BOMB_USEFUL, BOMB_TRAPPED = 0, 1, 2, 3
 
+# bomb_safety reuses the same slot with a different question: not "would this
+# bomb achieve anything" but "how much room would be left to escape it". With
+# opponents on the board the escape route computed at bomb time can be walked
+# into by someone else, so a bomb with a single way out and a bomb with three
+# are very different risks - and the binary escape_dir cannot tell them apart.
+SAFE_NONE, SAFE_TRAPPED, SAFE_TIGHT, SAFE_ROBUST = 0, 1, 2, 3
+
 # Which optional state components are switched on. Set once at setup and stored
 # inside the model, so that a model is always evaluated with the same
 # observation it was trained on. Holding a component at a constant value
 # collapses it out of the encoding without changing LAYOUT, which is what makes
 # a clean ablation possible.
-FLAGS = {"use_bomb_opt": False, "use_opponent_blocking": False}
+FLAGS = {"use_bomb_opt": False, "use_opponent_blocking": False,
+         "use_bomb_safety": False, "use_exact_escape": False}
 
 
 def blast_tiles(field, x, y):
@@ -141,7 +149,97 @@ class Board:
     def lethal_at(self, tile, k):
         return bool(self.lethal[min(k, HORIZON)][tile[0], tile[1]])
 
+    def survival_table(self):
+        """survive[k][x, y]: standing there at step k, is the horizon reachable.
+
+        Backward induction from the horizon, one pass over (tile, step). A
+        breadth-first search that shares one `seen` set across several starting
+        moves is not equivalent: whichever branch reaches a tile first claims it,
+        so a route that needed that tile is reported as blocked even when it is
+        open. This has no such failure and costs less, because each cell is
+        settled once instead of being re-explored per starting move.
+        """
+        free = (self.field == 0)
+        for bx, by in self.bomb_tiles:
+            free[bx, by] = False
+
+        survive = [None] * (HORIZON + 1)
+        survive[HORIZON] = free & ~self.lethal[HORIZON]
+        for k in range(HORIZON - 1, 0, -1):
+            nxt = survive[k + 1]
+            reachable = nxt.copy()                      # stand still
+            reachable[:-1, :] |= nxt[1:, :]             # step right
+            reachable[1:, :] |= nxt[:-1, :]             # step left
+            reachable[:, :-1] |= nxt[:, 1:]             # step down
+            reachable[:, 1:] |= nxt[:, :-1]             # step up
+            survive[k] = free & ~self.lethal[k] & reachable
+        return survive
+
+    def escape_routes(self):
+        """How many distinct first moves survive the whole horizon.
+
+        The binary version answers "is there a way out"; this answers "how many",
+        which is what separates a bomb that a moving opponent can seal off from
+        one that it cannot.
+        """
+        survive = self.survival_table()
+        routes = 0
+        for first in list(range(1, 5)) + [DIR_HERE]:
+            tile = self._first_step_tile(first)
+            if tile is not None and survive[1][tile[0], tile[1]]:
+                routes += 1
+        return routes
+
+    def _first_step_tile(self, first_move):
+        """Where a given opening move lands, or None if it is not legal now."""
+        if first_move == DIR_HERE:
+            return self.pos
+        dx, dy = DIRS[first_move - 1]
+        tile = (self.pos[0] + dx, self.pos[1] + dy)
+        return tile if self.walkable(tile, now=True) else None
+
+    def _survives_starting_with(self, first_move):
+        if first_move == DIR_HERE:
+            start = self.pos
+        else:
+            dx, dy = DIRS[first_move - 1]
+            start = (self.pos[0] + dx, self.pos[1] + dy)
+            if not self.walkable(start, now=True):
+                return False
+        if self.lethal_at(start, 1):
+            return False
+
+        queue = deque([(start, 1)])
+        seen = {(start, 1)}
+        while queue:
+            tile, k = queue.popleft()
+            if k >= HORIZON:
+                return True
+            for nxt in list(self.neighbours(*tile)) + [tile]:
+                if not self.lethal_at(nxt, k + 1) and (nxt, k + 1) not in seen:
+                    seen.add((nxt, k + 1))
+                    queue.append((nxt, k + 1))
+        return False
+
     def escape_search(self):
+        if FLAGS["use_exact_escape"]:
+            return self._escape_exact()
+        return self._escape_frontier()
+
+    def _escape_exact(self):
+        """First opening move of a surviving route, from the survival table."""
+        if self.lethal_at(self.pos, 0):
+            return DIR_NONE
+        if all(not self.lethal_at(self.pos, k) for k in range(HORIZON + 1)):
+            return DIR_HERE
+        survive = self.survival_table()
+        for first in list(range(1, 5)) + [DIR_HERE]:
+            tile = self._first_step_tile(first)
+            if tile is not None and survive[1][tile[0], tile[1]]:
+                return first
+        return DIR_NONE
+
+    def _escape_frontier(self):
         """Is there a sequence of moves that survives the whole horizon?
 
         Searched over (tile, step) pairs rather than tiles: a tile that burns at
@@ -265,6 +363,17 @@ class Observation:
         self.pos = pos
 
 
+def bomb_safety(game_state, board):
+    """How robust the escape would be after dropping a bomb here."""
+    if not game_state["self"][2]:
+        return SAFE_NONE
+    hypothetical = Board(game_state, extra_bomb=board.pos)
+    routes = hypothetical.escape_routes()
+    if routes == 0:
+        return SAFE_TRAPPED
+    return SAFE_TIGHT if routes == 1 else SAFE_ROBUST
+
+
 def bomb_option(game_state, board):
     """What dropping a bomb on the current tile would accomplish.
 
@@ -307,8 +416,9 @@ def observe(game_state):
         target_dir=target_dir,
         target_kind=target_kind,
         escape_dir=board.escape_search(),
-        bomb_opt=(bomb_option(game_state, board)
-                  if FLAGS["use_bomb_opt"] else BOMB_NONE),
+        bomb_opt=(bomb_safety(game_state, board) if FLAGS["use_bomb_safety"]
+                  else bomb_option(game_state, board) if FLAGS["use_bomb_opt"]
+                  else BOMB_NONE),
         target_dist=target_dist,
         pos=board.pos,
     )

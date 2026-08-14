@@ -17,8 +17,8 @@ sys.path.insert(0, str(ROOT))
 import settings as s  # noqa: E402
 from agent_code.tabular_q.features import (  # noqa: E402
     BLOCKED, BOMB_NONE, BOMB_POINTLESS, BOMB_TRAPPED, BOMB_USEFUL, DIR_HERE,
-    DIR_NONE, FLAGS, FREE_LETHAL, FREE_SAFE, HORIZON, Board, blast_tiles,
-    danger_schedule, observe)
+    DIR_NONE, FLAGS, FREE_LETHAL, FREE_SAFE, HORIZON, SAFE_NONE, SAFE_ROBUST,
+    SAFE_TIGHT, SAFE_TRAPPED, Board, blast_tiles, danger_schedule, observe)
 
 
 @pytest.fixture
@@ -266,3 +266,51 @@ def test_opponents_do_not_block_beyond_the_first_step(opponent_blocking_on):
     # The tile two steps past the opponent is still reachable in the search.
     assert board.walkable((7, 4), now=True) is False
     assert board.walkable((7, 4)) is True
+
+
+@pytest.fixture
+def bomb_safety_on():
+    FLAGS["use_bomb_safety"] = True
+    yield
+    FLAGS["use_bomb_safety"] = False
+
+
+def test_bomb_safety_reports_no_bomb(bomb_safety_on):
+    field = open_field()
+    state = make_state(field, (4, 4))
+    state["self"] = ("me", 0, False, (4, 4))
+    assert observe(state).bomb_opt == SAFE_NONE
+
+
+def test_bomb_safety_open_board_is_robust(bomb_safety_on):
+    """In the open there are several ways out, so bombing is low risk."""
+    obs = observe(make_state(open_field(11, 11), (5, 5)))
+    assert obs.bomb_opt == SAFE_ROBUST
+
+
+def test_bomb_safety_dead_end_is_trapped(bomb_safety_on):
+    field = open_field(11, 11)
+    field[:, 1] = -1
+    field[:, 3] = -1
+    field[4:, 2] = -1                       # corridor x = 1..3 only
+    assert observe(make_state(field, (2, 2))).bomb_opt == SAFE_TRAPPED
+
+
+def test_bomb_safety_single_corridor_is_tight(bomb_safety_on):
+    """One way out is survivable but an opponent can seal it."""
+    field = open_field(13, 13)
+    field[:, 1] = -1
+    field[:, 3] = -1                        # long corridor at y = 2
+    obs = observe(make_state(field, (2, 2)))
+    assert obs.bomb_opt == SAFE_TIGHT
+
+
+def test_bomb_safety_counts_routes_not_just_existence(bomb_safety_on):
+    field = open_field(13, 13)
+    field[:, 1] = -1
+    field[:, 3] = -1
+    tight = Board(make_state(field, (2, 2)), extra_bomb=(2, 2)).escape_routes()
+    field[2, 3] = 0                         # open a second way out
+    field[2, 4] = 0
+    roomier = Board(make_state(field, (2, 2)), extra_bomb=(2, 2)).escape_routes()
+    assert roomier > tight
