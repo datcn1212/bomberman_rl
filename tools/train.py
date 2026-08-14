@@ -120,7 +120,11 @@ def main():
     parser.add_argument("--full-rounds", action="store_true",
                         help="pass --continue-without-training so rounds are not "
                              "cut short when our agent dies")
-    parser.add_argument("--workers", type=int, default=3)
+    parser.add_argument("--workers", type=int, default=3,
+                        help="training processes; one per seed removes a whole "
+                             "scheduling round, and single-threaded jobs tolerate "
+                             "mild oversubscription")
+    parser.add_argument("--eval-workers", type=int, default=4)
     parser.add_argument("--note", default="")
     args = parser.parse_args()
 
@@ -146,7 +150,7 @@ def main():
             args.agent, args.eval_opponents, eval_scenario, mode=args.eval_mode,
             seeds=EVAL_SEEDS[:args.eval_seeds], n_rounds=args.eval_rounds, tag=tag,
             extra_env={"TQ_CONFIG": _eval_config(args.exp_id, seed, model_path, overrides)},
-            workers=4)
+            workers=args.eval_workers)
         print(format_metrics(metrics), flush=True)
         register(metrics, exp_id=tag, note=args.note)
         results.append(metrics)
