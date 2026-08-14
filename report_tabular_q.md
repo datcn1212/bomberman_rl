@@ -74,6 +74,8 @@ effects being measured.
 | 12 | D4 canonicalisation | **coins 5.91 -> 8.88 (t=4.96, 10/10)**, beats reference | **kept** |
 | 13 | combine the marginal effects | **worse** (7.41 vs 8.88); optimum moved | **rejected** |
 | 15 | gamma = 1 (undiscounted) | mean down, **variance x9** | **rejected** |
+| 16 | Tasks 3-4: model opponents as obstacles | score +0.42, kills +0.04 (t=2.03) | **kept** |
+| 17 | attack the 48% self-kill rate | running | |
 
 ---
 
@@ -575,6 +577,58 @@ The prediction was that this shows up as *variance*, not as a lower mean. It doe
 The mean drops modestly; the standard deviation across seeds grows **nine-fold**,
 with the worst seed at 3.23 of 9. Undiscounted returns make the agent's value
 estimates depend on information it does not have.
+
+---
+
+## Phase 16 - Tasks 3-4, and modelling other agents
+
+Against three `rule_based_agent`s the solo policy does not transfer: **8.88
+coins solo becomes 1.27**, and the self-kill rate goes from 0.002 to 0.387.
+
+The first modelling question is whether other agents should be treated as
+obstacles at all. Two agents cannot share a tile, so a move into an occupied one
+is invalid and the agent simply stays put - which matters most in the middle of
+an escape. Opponents block only the **immediate** move: beyond that they have
+moved too, and treating a body as a permanent wall would report traps that do
+not exist. This changes no radix, so it costs no resolution.
+
+10 seeds, paired, only `use_opponent_blocking` differs:
+
+| | score | coins | kills | self-kill | crates |
+|---|---|---|---|---|---|
+| opponents invisible | 1.633 | 1.273 | 0.072 | 0.387 | 28.93 |
+| **opponents block moves** | **2.056** | 1.499 | **0.112** | 0.479 | 32.02 |
+
+| metric | paired diff | t | seeds better |
+|---|---|---|---|
+| score | +0.424 +/- 0.299 | +1.42 | 7/10 |
+| **kills** | +0.040 +/- 0.020 | **+2.03** | 7/10 |
+| self-kill | +0.091 +/- 0.053 | +1.72 | **2/10** |
+
+The expected gain was fewer deaths - an escape route through another agent's
+body is not an escape route. What the measurement shows instead is a **more
+aggressive** agent: kills rise 55% and score rises, while the self-kill rate
+rises too. Knowing where the opponents are makes bombing near them attractive,
+and bombing near them is dangerous.
+
+`score_margin` improves from -2.58 to -2.04, so the gap to the opponents closes
+but does not disappear: they score about 4.1, we score 2.06.
+
+### What actually limits Tasks 3-4
+
+The dominant loss is **self-inflicted**: `suicide_rate` counts `KILLED_SELF`, and
+it is 0.479 with opponents against 0.002 solo - with *fewer* bombs per round
+(13.8 against 41). Each bomb is far more likely to be fatal.
+
+The mechanism this points at: the escape route is computed at the moment the bomb
+is dropped, assuming the corridors stay empty, and an opponent then steps into it.
+Modelling opponents at the immediate step does not cover that.
+
+Two independent candidates are being measured, one arm each against Phase 16:
+
+* only 6000 of the 12000 training episodes have opponents present;
+* death is underpriced - it ends the episode and forfeits every remaining coin,
+  but the reward charges a flat -5.
 
 ---
 
