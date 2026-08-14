@@ -77,6 +77,7 @@ effects being measured.
 | 16 | Tasks 3-4: model opponents as obstacles | score +0.42, kills +0.04 (t=2.03) | **kept** |
 | 17a | train all 12000 episodes with opponents | **coins +0.42 (t=2.96, 9/10)** | **kept** |
 | 17b | death penalty -5 -> -15 | score -0.50, kills -0.03 | **rejected** |
+| 18 | is D4 still needed with opponents? | **without it the agent never learns at all** | **kept** |
 
 ---
 
@@ -668,6 +669,57 @@ same four-agent setting, kills itself in **50%** of rounds and still scores 3.26
 A high self-kill rate is a property of a crowded board, not a defect to fix.
 
 **Decision.** Train entirely with opponents; keep `reward_killed_self` at -5.
+
+---
+
+## Phase 18 - is symmetry still needed once opponents are present?
+
+D4 was measured on `classic` **solo** and switched on in every four-agent run
+since. Whether it still pays there is a separate question, and there was reason
+to doubt it: the state does not encode opponent positions, so situations that
+differ only in where the opponents stand already share a row. Folding another
+four to eight situations on top could over-aggregate.
+
+Single variable against Phase 17a, 12000 episodes all with opponents, 10 seeds:
+
+| | score | coins | kills | self-kill | seed range |
+|---|---|---|---|---|---|
+| **symmetry on** | **2.492** | 1.913 | 0.116 | 0.471 | 2.24 - 2.83 |
+| symmetry off | **0.016** | 0.007 | 0.002 | **0.956** | 0.00 - 0.07 |
+
+| metric | paired diff | t |
+|---|---|---|
+| score | **+2.476 +/- 0.063** | **+39.5** |
+| coins | +1.906 +/- 0.045 | +42.0 |
+| self-kill | -0.486 +/- 0.019 | -25.0 |
+
+Without symmetry the agent does not merely play worse - it **never starts
+learning**. The training logs show why:
+
+| episode block | with symmetry | without |
+|---|---|---|
+| 0 - 1000, steps per round | 10.7 | 9.3 |
+| 4000 - 5000, steps per round | **116.3** | **8.3** |
+| 11000 - 12000, steps per round | 117.4 | **7.1** |
+| 11000 - 12000, self-kill rate | 0.84 | **1.00** |
+
+Both start identically: a blank table against three opponents dies in about ten
+steps. With symmetry each row receives roughly four times the experience, which
+is enough to learn to survive; rounds lengthen to ~117 steps, which multiplies
+the data by another factor of fourteen, and the loop turns favourable. Without
+it, the agent never escapes an eight-step death spiral - fewer steps means fewer
+transitions, which means it never learns the thing that would let it live longer.
+
+This is why the solo result did not transfer. Playing alone, an untrained agent
+still gets a full 350-step round, so the data arrives regardless and a table four
+times larger merely learns more slowly. With three opponents bombing, survival is
+a precondition for collecting data at all.
+
+**Comment.** On the solo board symmetry was worth +2.97 coins. Here it is worth
+the difference between an agent and no agent. Same change, same code, two orders
+of magnitude apart in value - which is the strongest case in this log for
+re-testing a component in every setting it will be used in rather than carrying
+its verdict forward.
 
 ---
 
