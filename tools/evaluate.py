@@ -38,6 +38,10 @@ REGISTRY = ROOT / "experiments" / "registry.csv"
 # so that comparisons across experiments are fair.
 EVAL_SEEDS = list(range(9001, 9031))
 
+# Upper bound on one `main.py play` call. Generous: the slowest observed block
+# is ~120 s per process.
+PLAY_TIMEOUT = 900
+
 
 def _play(args):
     """Run one `main.py play` process and return the parsed stats dict."""
@@ -52,7 +56,15 @@ def _play(args):
            "--train", str(train_flag),
            "--save-stats", str(stats_path)]
     env = dict(os.environ, **(extra_env or {}))
-    proc = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
+    # A hard timeout, because a child that dies or wedges otherwise blocks the
+    # pool for ever: one segfaulting worker once stalled a run for three hours
+    # with no output and no error.
+    try:
+        proc = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True,
+                              text=True, timeout=PLAY_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("eval run %s exceeded %ds and was killed"
+                           % (tag, PLAY_TIMEOUT))
     if proc.returncode != 0:
         raise RuntimeError(f"eval run {tag} failed:\n{proc.stdout[-2000:]}\n{proc.stderr[-4000:]}")
     with open(stats_path) as fh:
