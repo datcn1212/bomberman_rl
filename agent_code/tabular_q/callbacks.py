@@ -30,6 +30,7 @@ def setup(self):
     # The observation must match the one the model was trained with, so at play
     # time the model's own record wins over whatever the config happens to say.
     features.FLAGS["use_bomb_opt"] = self.cfg.use_bomb_opt
+    features.FLAGS["use_opponent_blocking"] = self.cfg.use_opponent_blocking
     self.use_symmetry = self.cfg.use_symmetry
 
     # Training either continues an explicit checkpoint or starts empty. Playing

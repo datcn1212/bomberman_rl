@@ -208,3 +208,61 @@ def test_bomb_option_counts_crates_through_other_crates():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+@pytest.fixture
+def opponent_blocking_on():
+    FLAGS["use_opponent_blocking"] = True
+    yield
+    FLAGS["use_opponent_blocking"] = False
+
+
+def other(pos):
+    return ("them", 0, True, pos)
+
+
+def test_opponent_blocks_the_immediate_move(opponent_blocking_on):
+    field = open_field()
+    obs = observe(make_state(field, (4, 4), others=[other((5, 4))]))
+    assert obs.move_status[1] == BLOCKED          # RIGHT is occupied
+    assert obs.move_status[3] == FREE_SAFE        # LEFT is not
+
+
+def test_opponent_is_ignored_without_the_flag():
+    """The default has to stay exactly as it was, or every earlier result moves."""
+    field = open_field()
+    obs = observe(make_state(field, (4, 4), others=[other((5, 4))]))
+    assert obs.move_status[1] == FREE_SAFE
+
+
+def test_escape_does_not_route_through_a_body(opponent_blocking_on):
+    """The failure this fixes: a corridor whose only exit is occupied."""
+    field = open_field(11, 11)
+    field[:, 1] = -1
+    field[:, 3] = -1
+    field[6:, 2] = -1                             # dead end, x = 1..5
+    state = make_state(field, (4, 2), bombs=[((2, 2), 3)])
+    assert Board(state).escape_search() == DIR_NONE
+
+    # Same board, bomb further away so an escape east exists...
+    field2 = open_field(11, 11)
+    field2[:, 1] = -1
+    field2[:, 3] = -1
+    state2 = make_state(field2, (4, 2), bombs=[((1, 2), 3)])
+    assert Board(state2).escape_search() == 2     # RIGHT
+
+    # ... and now an opponent stands in it.
+    state3 = make_state(field2, (4, 2), bombs=[((1, 2), 3)],
+                        others=[other((5, 2))])
+    assert Board(state3).escape_search() != 2
+
+
+def test_opponents_do_not_block_beyond_the_first_step(opponent_blocking_on):
+    """They move too, so treating a body as a permanent wall over-reports traps."""
+    field = open_field(11, 11)
+    state = make_state(field, (4, 4), bombs=[((4, 4), 3)],
+                       others=[other((7, 4))])
+    board = Board(state)
+    # The tile two steps past the opponent is still reachable in the search.
+    assert board.walkable((7, 4), now=True) is False
+    assert board.walkable((7, 4)) is True

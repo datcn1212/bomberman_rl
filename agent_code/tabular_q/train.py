@@ -91,6 +91,7 @@ def reward_from(self, events, old_game_state=None):
     cfg = self.cfg
     reward = cfg.reward_step
     reward += cfg.reward_coin * events.count(e.COIN_COLLECTED)
+    reward += cfg.reward_kill * events.count(e.KILLED_OPPONENT)
     reward += cfg.reward_crate * events.count(e.CRATE_DESTROYED)
     reward += cfg.reward_coin_found * events.count(e.COIN_FOUND)
     if e.INVALID_ACTION in events:

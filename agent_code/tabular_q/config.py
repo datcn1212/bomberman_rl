@@ -54,12 +54,22 @@ class Config:
     # this, a horizontal and a vertical corridor are learned separately.
     use_symmetry: bool = False
 
+    # Treat a tile an opponent stands on as blocked for the immediate move.
+    # Not a new state component - it corrects what the existing ones report, so
+    # it costs no resolution. Without it the escape search routes paths through
+    # other agents' bodies, the move turns out invalid, and the agent stands
+    # still inside a blast.
+    use_opponent_blocking: bool = False
+
     # --- rewards ----------------------------------------------------------
     # The game's own score (1 per coin, 5 per kill) is far too sparse to learn
     # from, so the reward is assembled from the per-step event list. Every weight
     # is a config value, which makes a reward change an experiment rather than a
     # code edit.
     reward_coin: float = 1.0
+    # The game scores a kill at 5 and a coin at 1, so the ratio here matches the
+    # objective rather than being tuned to it.
+    reward_kill: float = 5.0
     reward_crate: float = 0.3
     reward_coin_found: float = 0.1
     # Charged the moment a bomb is dropped whose blast covers no crate. Phase 4

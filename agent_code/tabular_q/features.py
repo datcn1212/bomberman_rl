@@ -49,7 +49,7 @@ BOMB_NONE, BOMB_POINTLESS, BOMB_USEFUL, BOMB_TRAPPED = 0, 1, 2, 3
 # observation it was trained on. Holding a component at a constant value
 # collapses it out of the encoding without changing LAYOUT, which is what makes
 # a clean ablation possible.
-FLAGS = {"use_bomb_opt": False}
+FLAGS = {"use_bomb_opt": False, "use_opponent_blocking": False}
 
 
 def blast_tiles(field, x, y):
@@ -108,6 +108,11 @@ class Board:
         self.pos = game_state["self"][3]
         self.coins = game_state["coins"]
         self.bomb_tiles = {tuple(pos) for pos, _ in game_state["bombs"]}
+        # Two agents cannot share a tile, so moving into an occupied one is an
+        # invalid action: the agent stays put. Ignoring that is how a planned
+        # escape route ends with the agent standing still inside a blast.
+        self.other_tiles = ({tuple(other[3]) for other in game_state["others"]}
+                            if FLAGS["use_opponent_blocking"] else set())
         self.lethal = danger_schedule(game_state, extra_bomb)
         self.width, self.height = self.field.shape
 
@@ -115,9 +120,17 @@ class Board:
         """Walkable this step: not a wall, not a crate, not an armed bomb."""
         return self.field[x, y] == 0 and (x, y) not in self.bomb_tiles
 
-    def walkable(self, tile):
+    def walkable(self, tile, now=False):
+        """`now` also excludes tiles an opponent is standing on.
+
+        Only the *immediate* move is blocked by a body. Beyond that the
+        opponents have moved too, and treating them as permanent walls would
+        make the agent believe it is trapped when it is not.
+        """
         x, y = tile
-        return (0 <= x < self.width and 0 <= y < self.height and self.is_free(x, y))
+        if not (0 <= x < self.width and 0 <= y < self.height and self.is_free(x, y)):
+            return False
+        return not (now and (x, y) in self.other_tiles)
 
     def neighbours(self, x, y):
         for dx, dy in DIRS:
@@ -156,7 +169,7 @@ class Board:
                    for i, (dx, dy) in enumerate(DIRS)]
         options.append((self.pos, DIR_HERE))
         for tile, first_move in options:
-            if tile != self.pos and not self.walkable(tile):
+            if tile != self.pos and not self.walkable(tile, now=True):
                 continue
             if self.lethal_at(tile, 1) or (tile, 1) in seen:
                 continue
@@ -202,7 +215,7 @@ class Board:
         seen = {self.pos}
         for index, (dx, dy) in enumerate(DIRS):
             nxt = (self.pos[0] + dx, self.pos[1] + dy)
-            if self.walkable(nxt) and not self._soon_lethal(nxt):
+            if self.walkable(nxt, now=True) and not self._soon_lethal(nxt):
                 seen.add(nxt)
                 queue.append((nxt, index + 1, 1))
 
@@ -280,7 +293,7 @@ def observe(game_state):
     move_status = []
     for dx, dy in DIRS:
         nxt = (x + dx, y + dy)
-        if not board.walkable(nxt):
+        if not board.walkable(nxt, now=True):
             move_status.append(BLOCKED)
         elif board.lethal_at(nxt, 1):
             move_status.append(FREE_LETHAL)
