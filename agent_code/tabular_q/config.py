@@ -61,6 +61,17 @@ class Config:
     # still inside a blast.
     use_opponent_blocking: bool = False
 
+    # Reuse the dormant bomb_opt slot to report how many escape routes a bomb
+    # dropped here would leave: none / trapped / exactly one / two or more.
+    # A binary "is there a way out" cannot separate a bomb an opponent can seal
+    # off from one it cannot, which is what makes bombing risky in a crowd.
+    use_bomb_safety: bool = False
+
+    # Settle the escape question by backward induction over (tile, step) instead
+    # of a frontier search. More complete, but measured at 1.6x the cost for a
+    # disagreement in 0.4% of dangerous states, so it stays off.
+    use_exact_escape: bool = False
+
     # --- rewards ----------------------------------------------------------
     # The game's own score (1 per coin, 5 per kill) is far too sparse to learn
     # from, so the reward is assembled from the per-step event list. Every weight
