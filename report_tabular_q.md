@@ -211,8 +211,10 @@ Rejected two explanations by measurement first: *data dilution* (rows only +19%,
 and median visits per row went **up**, 37 -> 43) and *latency* (0.13-0.22 ms,
 three orders below the 0.5 s limit).
 
-The answer came from weighting rows by **how often they are actually visited**
-(counting rows gave a completely misleading picture first time):
+The answer comes from weighting rows by **how often they are actually visited**.
+Weighting matters here: an unweighted count over rows describes the table, not
+the policy, because the agent spends almost all of its time in a small minority
+of rows.
 
 | `bomb_opt` | share of time | BOMB is greedy |
 |---|---|---|
@@ -236,9 +238,11 @@ Added `reward_bomb_wasted` as a dose-response (5 seeds each): 0.0 -> 6.29,
 -0.1 -> 9.04, **-0.3 -> 15.15**, -0.6 -> 14.24 (bombing collapses, suicide
 returns). Right direction, but still **below the Phase 3 baseline of 20.21**.
 
-Between Phases 3 and 4, *two* things had changed: `bomb_opt` **and** dense ->
-sparse table. That was a design error. Fixed with an ablation switch holding
-`bomb_opt` constant, leaving every other line in place:
+Phase 4 changed two things at once: `bomb_opt` **and** the move from a dense
+array to a sparse dict. Neither can be blamed until they are separated, so an
+ablation switch holds `bomb_opt` at a constant, collapsing the encoding back to
+the Phase 3 partition while every other line - including the sparse table -
+stays in place:
 
 | | coins | suicide | crates |
 |---|---|---|---|
@@ -296,7 +300,7 @@ The penalty looked like a big win, so it went to 10 seeds before being believed.
 
 ---
 
-## Phase 7 - training budget (and my Phase 6 result dying)
+## Phase 7 - training budget
 
 At 10 seeds the penalty shrank to **+4.07 +/- 2.40 coins, t = +1.70**, only 6/10
 seeds better, with suicide moving *against* it. The 5-seed result was luck.
@@ -326,7 +330,9 @@ at 4000 episodes was purely an undertraining artifact.
 **Decisions:** `reward_bomb_wasted = 0`; budget 12000 episodes.
 
 > **General lesson:** settle the training budget *before* comparing rewards or
-> hyperparameters. Done in that order, Phases 5-6 would have been one experiment.
+> hyperparameters. A shaping term that measurably helps an undertrained agent can
+> be worth nothing at convergence, so any reward comparison run before the budget
+> is settled measures the budget, not the reward.
 
 ---
 
