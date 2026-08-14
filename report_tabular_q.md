@@ -75,7 +75,8 @@ effects being measured.
 | 13 | combine the marginal effects | **worse** (7.41 vs 8.88); optimum moved | **rejected** |
 | 15 | gamma = 1 (undiscounted) | mean down, **variance x9** | **rejected** |
 | 16 | Tasks 3-4: model opponents as obstacles | score +0.42, kills +0.04 (t=2.03) | **kept** |
-| 17 | attack the 48% self-kill rate | running | |
+| 17a | train all 12000 episodes with opponents | **coins +0.42 (t=2.96, 9/10)** | **kept** |
+| 17b | death penalty -5 -> -15 | score -0.50, kills -0.03 | **rejected** |
 
 ---
 
@@ -624,11 +625,49 @@ The mechanism this points at: the escape route is computed at the moment the bom
 is dropped, assuming the corridors stay empty, and an opponent then steps into it.
 Modelling opponents at the immediate step does not cover that.
 
-Two independent candidates are being measured, one arm each against Phase 16:
+Two independent candidates, one arm each against Phase 16.
 
-* only 6000 of the 12000 training episodes have opponents present;
-* death is underpriced - it ends the episode and forfeits every remaining coin,
-  but the reward charges a flat -5.
+**(a) How much of training has opponents present.** Phase 16 trains 6000
+episodes solo then 6000 with three opponents; this arm uses all 12000 with
+opponents.
+
+| | score | coins | kills | self-kill |
+|---|---|---|---|---|
+| 6000 solo + 6000 with opponents | 2.056 | 1.499 | 0.112 | 0.479 |
+| **all 12000 with opponents** | **2.492** | **1.913** | 0.116 | 0.471 |
+
+| metric | paired diff | t | seeds better |
+|---|---|---|---|
+| score | +0.435 +/- 0.188 | **+2.32** | **9/10** |
+| **coins** | +0.415 +/- 0.140 | **+2.96** | **9/10** |
+| kills | +0.004 +/- 0.015 | +0.28 | 5/10 |
+| self-kill | -0.008 +/- 0.032 | -0.25 | 6/10 |
+
+The gain is **entirely in coins**, with kills and self-kills unmoved. Collecting
+coins while three other agents contest the board is a distinct skill from
+collecting them alone, and solo episodes do not teach it. It also rules out the
+self-kill rate as the binding constraint: doubling opponent experience left it
+at 0.47 while the score rose.
+
+**(b) Pricing death higher.** `reward_killed_self` from -5 to -15:
+
+| metric | paired diff vs Phase 16 | t |
+|---|---|---|
+| score | **-0.497 +/- 0.295** | -1.68 |
+| kills | **-0.033 +/- 0.018** | -1.88 |
+| self-kill | -0.047 +/- 0.036 | -1.31 |
+
+Slightly safer, materially worse. This is the third time in this log that an
+intervention aimed directly at dying less has bought safety by suppressing the
+behaviour instead of improving it - the wasted-bomb penalty at -0.6 did it, and
+so did Double Q-learning in an earlier study. The agent does not learn to bomb
+*more safely*; it learns to bomb *less*.
+
+Context for why that trade never pays here: `rule_based_agent`, measured in the
+same four-agent setting, kills itself in **50%** of rounds and still scores 3.26.
+A high self-kill rate is a property of a crowded board, not a defect to fix.
+
+**Decision.** Train entirely with opponents; keep `reward_killed_self` at -5.
 
 ---
 

@@ -1,0 +1,11 @@
+{
+  "continue_from": null,
+  "eps_decay_episodes": 2000,
+  "gamma": 0.995,
+  "log_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p17_all_opp/seed2/phase0_classic.csv",
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p17_all_opp/seed2/model_phase0.pkl",
+  "n_episodes": 12000,
+  "seed": 1194,
+  "use_opponent_blocking": true,
+  "use_symmetry": true
+}
