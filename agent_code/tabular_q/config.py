@@ -72,6 +72,7 @@ class Config:
     # disagreement in 0.4% of dangerous states, so it stays off.
     use_exact_escape: bool = False
 
+
     # --- rewards ----------------------------------------------------------
     # The game's own score (1 per coin, 5 per kill) is far too sparse to learn
     # from, so the reward is assembled from the per-step event list. Every weight

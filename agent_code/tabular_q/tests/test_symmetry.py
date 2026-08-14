@@ -159,19 +159,16 @@ if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
 
 
-def test_observation_cache_distinguishes_two_agents():
-    """The cache is module level, so two instances in one game must not collide."""
-    field = open_field()
-    a = make_state(field, (2, 2), coins=[(6, 4)])
-    b = make_state(field, (6, 6), coins=[(6, 4)])
-    a["self"] = ("first", 0, True, (2, 2))
-    b["self"] = ("second", 0, True, (6, 6))
-    a["round"] = b["round"] = 1
-    a["step"] = b["step"] = 7
+def test_states_sharing_a_step_number_are_encoded_separately():
+    """The framework gives the state before and after an action the same `step`,
+    so nothing may be reused between them: the bomb timers differ."""
+    field = open_field(11, 11)
+    before = make_state(field, (4, 4), bombs=[((4, 6), 2)])
+    after = make_state(field, (4, 4), bombs=[((4, 6), 1)])
+    before["step"] = after["step"] = 7
+    before["round"] = after["round"] = 1
 
-    index_a, obs_a, _ = observe_and_encode(a, use_symmetry=False)
-    index_b, obs_b, _ = observe_and_encode(b, use_symmetry=False)
-    assert obs_a.pos != obs_b.pos
-    # And re-reading the first one still gives the first one.
-    again, obs_again, _ = observe_and_encode(a, use_symmetry=False)
-    assert (again, obs_again.pos) == (index_a, obs_a.pos)
+    index_before, obs_before, _ = observe_and_encode(before, use_symmetry=False)
+    index_after, obs_after, _ = observe_and_encode(after, use_symmetry=False)
+    assert obs_before.t_here != obs_after.t_here
+    assert index_before != index_after

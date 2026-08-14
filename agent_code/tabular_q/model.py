@@ -206,35 +206,20 @@ class QModel:
         return model
 
 
-# The framework hands the same game state to the agent more than once per step:
-# act() sees s_t, then game_events_occurred sees s_t again as `old` and s_(t+1)
-# as `new`, which act() will see next. observe() is a pure function of the state,
-# so memoising on (round, step) returns identical results while cutting the two
-# breadth-first searches from three evaluations per step to one.
-_CACHE_KEY = None
-_CACHE_VALUE = None
-
-
 def observe_and_encode(game_state, use_symmetry):
     """The observation, its table index, and the frame that index is written in.
 
     With symmetry off the frame is the identity and the index is the plain
     encoding, so the two modes differ by exactly one lookup.
-    """
-    global _CACHE_KEY, _CACHE_VALUE
-    # The agent's own name and position are part of the key: two instances of
-    # this agent in one game share this module, and share the same (round, step),
-    # but observe different states.
-    me = game_state["self"]
-    key = (game_state["round"], game_state["step"], me[0], me[3], use_symmetry)
-    if key == _CACHE_KEY:
-        return _CACHE_VALUE
 
+    Not memoised. The framework labels the state before an action and the state
+    after it with the same `step`, so (round, step) does not identify a state,
+    and caching on it returns a stale danger schedule whenever the agent's
+    position is unchanged - exactly the case that matters, standing still inside
+    a blast.
+    """
     obs = observe(game_state)
     if use_symmetry:
         index, perm = canonical(obs)
-        value = (index, obs, perm)
-    else:
-        value = (encode(obs), obs, IDENTITY)
-    _CACHE_KEY, _CACHE_VALUE = key, value
-    return value
+        return index, obs, perm
+    return encode(obs), obs, IDENTITY
