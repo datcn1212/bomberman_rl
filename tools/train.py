@@ -31,6 +31,23 @@ sys.path.insert(0, str(ROOT))
 from tools.evaluate import EVAL_SEEDS, evaluate, format_metrics, register  # noqa: E402
 
 EXPERIMENTS = ROOT / "experiments"
+
+
+def code_fingerprint():
+    """Commit of the agent code, plus a dirty marker.
+
+    Stamped into every phase config so that two runs can never be compared
+    without it being visible that they were produced by different code.
+    """
+    try:
+        head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
+                              capture_output=True, text=True).stdout.strip()
+        dirty = subprocess.run(["git", "status", "--porcelain", "--",
+                                "agent_code/tabular_q"], cwd=ROOT,
+                               capture_output=True, text=True).stdout.strip()
+    except Exception:
+        return "unknown"
+    return head + ("+dirty" if dirty else "")
 # Training seeds are drawn from a range disjoint from EVAL_SEEDS (9001..9030),
 # so no result is ever reported on an arena the agent trained on.
 TRAIN_SEED_BASE = 1000
@@ -46,7 +63,8 @@ def parse_phase(spec):
 
 
 def run_seed(job):
-    exp_id, seed_index, phases, overrides, phase_overrides, full_rounds, quiet, args_agent = job
+    (exp_id, seed_index, phases, overrides, phase_overrides, full_rounds,
+     quiet, args_agent, fingerprint) = job
     seed_dir = EXPERIMENTS / exp_id / ("seed%d" % seed_index)
     seed_dir.mkdir(parents=True, exist_ok=True)
 
@@ -65,6 +83,7 @@ def run_seed(job):
         cfg["log_path"] = str(seed_dir / ("phase%d_%s.csv" % (phase_index, scenario)))
         cfg["continue_from"] = str(previous) if previous else None
         cfg["seed"] = TRAIN_SEED_BASE + seed_index * 97 + phase_index
+        cfg["git_commit"] = fingerprint
         config_path = seed_dir / ("phase%d_config.json" % phase_index)
         config_path.write_text(json.dumps(cfg, indent=2, sort_keys=True))
 
@@ -135,8 +154,11 @@ def main():
           % (args.exp_id, args.phases, args.seeds, overrides, phase_overrides),
           flush=True)
 
+    fingerprint = code_fingerprint()
+    print("agent code at %s" % fingerprint, flush=True)
     jobs = [(args.exp_id, seed, phases, overrides, phase_overrides,
-             args.full_rounds, False, args.agent) for seed in args.seeds]
+             args.full_rounds, False, args.agent, fingerprint)
+            for seed in args.seeds]
     started = time.time()
     with ProcessPoolExecutor(max_workers=min(args.workers, len(jobs))) as pool:
         models = list(pool.map(run_seed, jobs))

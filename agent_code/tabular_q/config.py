@@ -116,6 +116,9 @@ class Config:
     model_path: str = "model.pkl"
     continue_from: str = None
     log_path: str = None
+    # Stamped by the training driver so a stored model can be traced back to the
+    # exact agent code that produced it.
+    git_commit: str = ""
 
 
 def load():
