@@ -72,7 +72,8 @@ effects being measured.
 | 10 | gamma 0.9 -> 0.99 | classic score **x3.2** (t=5.24) | **kept** |
 | 11 | gamma 0.995 / 0.999, Max-Boltzmann retest | 0.999 best; Boltzmann now helps | see below |
 | 12 | D4 canonicalisation | **coins 5.91 -> 8.88 (t=4.96, 10/10)**, beats reference | **kept** |
-| 13 | combine the marginal effects | leave-one-out | running |
+| 13 | combine the marginal effects | **worse** (7.41 vs 8.88); optimum moved | **rejected** |
+| 15 | gamma = 1 (undiscounted) | mean down, **variance x9** | **rejected** |
 
 ---
 
@@ -511,10 +512,61 @@ canonicalisation is the same trade run backwards, and it is free.
 
 gamma 0.999, Max-Boltzmann and symmetry each land at t = 1.2-1.8 alone:
 individually inconclusive, all pointing the same way. Rather than tuning each
-until it crosses a threshold, they are tested **together** against the gamma-0.99
-baseline, with leave-one-out arms so the result is not credited to the wrong part.
+until it crosses a threshold, they are tested **together**, with leave-one-out
+arms so the result is not credited to the wrong part.
 
-*(running)*
+**The combination is worse than its parts.** `classic`, 12000 ep, 10 seeds:
+
+| config | coins | crates | suicide | seed range |
+|---|---|---|---|---|
+| **gamma 0.995 + symmetry** | **8.88** | 122.23 | 0.002 | **8.60 - 9.00** |
+| gamma 0.999 + symmetry | 8.62 | 120.39 | 0.002 | 7.13 - 9.00 |
+| gamma 1.0 + symmetry | 8.02 | 112.83 | 0.010 | 3.23 - 9.00 |
+| gamma 0.999 + symmetry + Boltzmann | 7.41 | 104.91 | 0.004 | 2.00 - 9.00 |
+| gamma 0.999 + Boltzmann, no symmetry | 6.39 | 96.45 | 0.014 | 3.21 - 8.77 |
+
+Attribution, each change measured paired against the arm without it:
+
+| change | effect | t | seeds better |
+|---|---|---|---|
+| add Max-Boltzmann | **-1.20 +/- 0.90** | -1.33 | 4/10 |
+| add symmetry | +1.02 +/- 1.02 | +1.00 | 6/10 |
+| gamma 0.995 -> 0.999 | **-0.26 +/- 0.20** | -1.34 | 2/10 |
+| gamma 0.999 -> 1.0 | **-0.60 +/- 0.60** | -1.00 | 4/10 |
+
+**The optimum of gamma moved once symmetry was switched on.** Without symmetry,
+higher was strictly better (0.99 -> 0.995 -> 0.999, monotone). With symmetry,
+0.995 is best and going further hurts. Max-Boltzmann, which had looked helpful
+at gamma 0.99 *without* symmetry, is now the single most harmful component.
+
+> **General lesson (third time):** an effect measured in one setting does not
+> transfer to another. Every marginal gain in this log was measured before
+> symmetry existed, and symmetry invalidated all of them. Combining separately
+> measured improvements is not additive - it needs its own experiment.
+
+**Decision.** Final configuration is **gamma 0.995, symmetry on, plain
+epsilon-greedy** - the Phase 12 config.
+
+---
+
+## Phase 15 - gamma = 1
+
+Legitimate in principle: the task is episodic and terminal transitions bootstrap
+from nothing, so returns are finite. The concern was specific - **the state
+carries no clock**, so the same row is visited at step 5 and at step 395, whose
+true values differ by an entire episode. A discount hides that; gamma = 1 cannot.
+
+The prediction was that this shows up as *variance*, not as a lower mean. It does:
+
+| gamma | mean coins | between-seed sd |
+|---|---|---|
+| 0.995 | 8.88 | **0.19** |
+| 0.999 | 8.62 | **0.56** |
+| 1.0 | 8.02 | **1.76** |
+
+The mean drops modestly; the standard deviation across seeds grows **nine-fold**,
+with the worst seed at 3.23 of 9. Undiscounted returns make the agent's value
+estimates depend on information it does not have.
 
 ---
 
@@ -522,9 +574,9 @@ baseline, with leave-one-out arms so the result is not credited to the wrong par
 
 ```
 alpha 0.1, alpha_schedule "visit", alpha_half_life 1000
-gamma 0.999            (config default still says 0.9 - passed via overrides)
+gamma 0.995            (config default still says 0.9 - passed via overrides)
 exploration "epsilon", eps 1.0 -> 0.05 over 2000 episodes
-use_bomb_opt False, use_symmetry (under test), reward_bomb_wasted 0, shaping_weight 0
+use_bomb_opt False, use_symmetry True, reward_bomb_wasted 0, shaping_weight 0
 rewards: coin +1, crate +0.3, coin_found +0.1, invalid -0.5,
          wait -0.05, step -0.01, killed_self -5, got_killed -5
 budget: 12000 episodes on `classic`
@@ -533,11 +585,13 @@ budget: 12000 episodes on `classic`
 ## Rejected, with evidence
 
 `bomb_opt` feature - potential-based shaping - wasted-bomb penalty -
-Max-Boltzmann exploration - curriculum `loot-crate` -> `classic`.
+Max-Boltzmann exploration (helpful at gamma 0.99 without symmetry, harmful with
+it) - curriculum `loot-crate` -> `classic` - gamma above 0.995 - gamma = 1.
 
 ## Open
 
-- Phase 13 combination result, then fold the winner into the config defaults.
-- Tasks 3-4: opponent features, training against `rule_based_agent`.
+- Fold the winning config into `config.py` defaults (gamma is still 0.9 there).
+- Tasks 3-4: opponent baseline running, then opponent features only if the
+  baseline shows they are needed.
 - Final: hyperparameter search, latency benchmark, submission checks, ship
   `model.pkl` next to the agent.

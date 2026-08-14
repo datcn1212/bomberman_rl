@@ -1,0 +1,7 @@
+{
+  "continue_from": null,
+  "exploration": "max_boltzmann",
+  "gamma": 0.999,
+  "log_path": null,
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p13_no_sym/seed1/model.pkl"
+}
