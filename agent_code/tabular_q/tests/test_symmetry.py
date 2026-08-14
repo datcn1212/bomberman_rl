@@ -157,3 +157,21 @@ def test_canonical_index_is_never_larger_than_the_plain_one():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+def test_observation_cache_distinguishes_two_agents():
+    """The cache is module level, so two instances in one game must not collide."""
+    field = open_field()
+    a = make_state(field, (2, 2), coins=[(6, 4)])
+    b = make_state(field, (6, 6), coins=[(6, 4)])
+    a["self"] = ("first", 0, True, (2, 2))
+    b["self"] = ("second", 0, True, (6, 6))
+    a["round"] = b["round"] = 1
+    a["step"] = b["step"] = 7
+
+    index_a, obs_a, _ = observe_and_encode(a, use_symmetry=False)
+    index_b, obs_b, _ = observe_and_encode(b, use_symmetry=False)
+    assert obs_a.pos != obs_b.pos
+    # And re-reading the first one still gives the first one.
+    again, obs_again, _ = observe_and_encode(a, use_symmetry=False)
+    assert (again, obs_again.pos) == (index_a, obs_a.pos)
