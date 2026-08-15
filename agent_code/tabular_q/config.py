@@ -15,7 +15,7 @@ from dataclasses import dataclass, fields
 class Config:
     # --- learning ---------------------------------------------------------
     alpha: float = 0.1
-    gamma: float = 0.9
+    gamma: float = 0.995
     # "constant" keeps alpha fixed, which violates the Robbins-Monro condition
     # sum(alpha^2) < inf: the estimate never settles, it random-walks around the
     # true value forever. "visit" divides by the visit count of the individual
@@ -52,14 +52,14 @@ class Config:
     # x two reflections). Every feature is relative to the agent, so rotating
     # the board is the same situation described in a different frame; without
     # this, a horizontal and a vertical corridor are learned separately.
-    use_symmetry: bool = False
+    use_symmetry: bool = True
 
     # Treat a tile an opponent stands on as blocked for the immediate move.
     # Not a new state component - it corrects what the existing ones report, so
     # it costs no resolution. Without it the escape search routes paths through
     # other agents' bodies, the move turns out invalid, and the agent stands
     # still inside a blast.
-    use_opponent_blocking: bool = False
+    use_opponent_blocking: bool = True
 
     # Reuse the dormant bomb_opt slot to report how many escape routes a bomb
     # dropped here would leave: none / trapped / exactly one / two or more.
@@ -111,7 +111,7 @@ class Config:
     trace_state: int = -1
 
     # --- bookkeeping ------------------------------------------------------
-    n_episodes: int = 1000
+    n_episodes: int = 6000
     seed: int = 0
     model_path: str = "model.pkl"
     continue_from: str = None
