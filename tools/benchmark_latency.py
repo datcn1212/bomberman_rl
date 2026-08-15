@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 import settings as s  # noqa: E402
 from agent_code.tabular_q import model as qmodel  # noqa: E402
-from agent_code.tabular_q.features import observe  # noqa: E402
+from agent_code.tabular_q.features import FLAGS, observe  # noqa: E402
 
 
 def worst_case_states(n=400, seed=7):
@@ -83,7 +83,11 @@ def main():
     q = qmodel.QModel()
     if len(sys.argv) > 1:
         q = qmodel.QModel.load(sys.argv[1])
-    use_symmetry = bool(getattr(q, "feature_flags", {}).get("use_symmetry", False))
+    stored = dict(getattr(q, "feature_flags", None) or {})
+    use_symmetry = bool(stored.pop("use_symmetry", False))
+    # Honour every flag the model was trained with, or the measurement leaves out
+    # work the agent actually does at play time.
+    FLAGS.update(stored)
 
     # Warm up so import and first-touch costs do not pollute the measurement.
     for st in states[:20]:

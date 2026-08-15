@@ -145,7 +145,8 @@ def check_imports_are_available():
     """Everything the agent imports must exist in the tournament image. numpy
     and settings are guaranteed; anything else has to be declared."""
     allowed_stdlib = {"json", "os", "pickle", "collections", "pathlib", "math",
-                      "csv", "time", "sys", "itertools", "random", "copy"}
+                      "csv", "time", "sys", "itertools", "random", "copy",
+                      "dataclasses", "functools", "heapq"}
     external = set()
     for path in sorted(AGENT_DIR.glob("*.py")):
         tree = ast.parse(path.read_text())
@@ -218,7 +219,7 @@ def main():
     check_no_network_or_writes_outside_agent()
     check_imports_are_available()
     print("model:")
-    check_model_loads_from_anywhere()
+    check_model_loads_the_way_the_framework_loads_it()
     check_defaults_match_the_submitted_model()
 
     failed = [name for name, ok, _ in RESULTS if not ok]
