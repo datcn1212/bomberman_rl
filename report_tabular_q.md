@@ -77,7 +77,8 @@ effects being measured.
 | 16 | Tasks 3-4: model opponents as obstacles | score +0.42, kills +0.04 (t=2.03) | **kept** |
 | 17a | train all 12000 episodes with opponents | **coins +0.42 (t=2.96, 9/10)** | **kept** |
 | 17b | death penalty -5 -> -15 | score -0.50, kills -0.03 | **rejected** |
-| 18 | is D4 still needed with opponents? | measuring | |
+| 18 | is D4 still needed with opponents? | score +0.46 (t=3.79), coins +0.48 (t=9.44) | **kept** |
+| 19 | halve the training budget to 6000 | coins unchanged (t=0.30) | **kept** |
 
 ---
 
@@ -680,7 +681,55 @@ doubt it: the state does not encode opponent positions, so situations that diffe
 only in where the opponents stand already share a row. Folding another four to
 eight situations on top could over-aggregate.
 
-*(measuring: symmetry on/off, 12000 episodes all with opponents, 10 seeds)*
+Single variable against Phase 17a, 12000 episodes all with opponents, 10 seeds:
+
+| | score | coins | kills | self-kill |
+|---|---|---|---|---|
+| **symmetry on** | **2.492** | **1.913** | 0.116 | 0.471 |
+| symmetry off | 2.036 | 1.438 | 0.119 | 0.517 |
+
+| metric | paired diff | t |
+|---|---|---|
+| score | +0.456 +/- 0.120 | **+3.79** |
+| coins | +0.476 +/- 0.050 | **+9.44** |
+| self-kill | -0.046 +/- 0.037 | -1.26 |
+
+So the doubt was unfounded: folding opponent-varying situations together does not
+over-aggregate. The gain is entirely in coins, with kills and self-kills unmoved -
+the same shape as the Phase 17a gain, and consistent with the mechanism measured
+on the solo board, where symmetry raises the experience per row about fivefold.
+
+It is worth noting the size. On `classic` solo symmetry was worth +2.97 coins and
+took the agent past `rule_based_agent`; here it is worth +0.48. Both are real and
+both are significant, but the solo figure does not transfer as a magnitude - only
+as a direction.
+
+---
+
+## Phase 19 - how much training is actually needed
+
+The budget of 12000 episodes was fixed in Phase 7, when the table held ~660 rows.
+Symmetry has since reduced it to 174, so each row now receives roughly four times
+the experience and should converge sooner. The training curve agrees - coins per
+episode is flat from about episode 4000 in every configuration - but a curve
+measured at `epsilon = 0.05` can hide slow refinement that a greedy evaluation
+would show, so it was measured directly.
+
+Half the episodes, everything else identical, 10 seeds:
+
+| | score | coins | kills | self-kill |
+|---|---|---|---|---|
+| 12000 episodes | 2.492 | 1.913 | 0.116 | 0.471 |
+| **6000 episodes** | 2.379 | **1.895** | 0.097 | 0.447 |
+
+| metric | paired diff | t |
+|---|---|---|
+| coins | +0.019 +/- 0.064 | **+0.30** |
+| score | +0.113 +/- 0.078 | +1.45 |
+
+Coins are unchanged. **Half the budget buys the same agent**, which halves the
+cost of every experiment from here on - the point at which that matters most,
+because the hyperparameter search is next.
 
 ---
 
