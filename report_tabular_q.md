@@ -80,6 +80,7 @@ effects being measured.
 | 18 | is D4 still needed with opponents? | score +0.46 (t=3.79), coins +0.48 (t=9.44) | **kept** |
 | 19 | halve the training budget to 6000 | coins unchanged (t=0.30) | **kept** |
 | 20 | `bomb_safety`: count escape routes | score -0.62 (t=-7.1), bombs +54% | **rejected** |
+| 21 | random hyperparameter search, 13 candidates | nothing beats the current defaults | **kept as is** |
 
 ---
 
@@ -791,6 +792,46 @@ bomb safely instead of bombing less - is that this attempt does not answer it. T
 information that would separate a safe bomb from a reckless one is a prediction
 about what the opponents will do, and none of the features tried so far are
 predictions; they are all measurements of the current board.
+
+---
+
+## Phase 21 - hyperparameter search
+
+Every parameter had been examined individually across the log, but never jointly,
+and the assignment treats hyperparameter optimisation as required work. Thirteen
+candidates - the current configuration plus twelve random draws over nine
+dimensions (`alpha`, `alpha_half_life`, `eps_end`, `eps_decay_episodes`, `gamma`
+and four reward weights).
+
+Two stages, because running every candidate at full protocol is not affordable:
+**screen** on 3 seeds and 4000 episodes to rank, then **confirm** the best three
+on 10 seeds and 6000 episodes. Nothing is concluded from the screen; it only
+orders candidates. Values were drawn around the current setting rather than
+around the tuned values of an earlier study, because Phase 13 showed the optimum
+moves when the surrounding configuration changes.
+
+**Screen** - the current configuration came out on top of all thirteen (2.393),
+ahead of the best random draw (2.247).
+
+**Confirm** - 10 seeds, paired:
+
+| config | score | vs default | t | seeds better |
+|---|---|---|---|---|
+| **current defaults** | 2.376 +/- 0.141 | - | - | - |
+| best random draw | 2.420 +/- 0.075 | +0.044 +/- 0.132 | **+0.33** | 6/10 |
+| second | 2.109 +/- 0.070 | -0.267 +/- 0.163 | -1.64 | 1/10 |
+
+Coins, kills and self-kill rate are all inside noise as well (|t| <= 1.29).
+
+**The search finds nothing better.** That is a result rather than a failure: the
+configuration reached by reasoning phase by phase already sits at a local optimum
+of this space. It is worth contrasting with an earlier tabular study on the same
+game, where an equivalent random search lifted the score by 32% - there the
+starting point had never been tuned, whereas here every one of these parameters
+had already been the subject of its own experiment.
+
+**Decision.** Keep the configuration unchanged, and fold it into `config.py` as
+the defaults, since the tournament runs the agent with no config file.
 
 ---
 
