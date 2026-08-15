@@ -54,15 +54,31 @@ as the effects being measured.
 
 **Noise floor with opponents.** `rule_based_agent` re-seeds itself from system
 entropy, so two runs of an *identical* configuration do not repeat: the opponents
-behave differently across 6000 training episodes and our agent learns a different
+behave differently over the training episodes and the agent learns a different
 table. Pairing on the training seed does not remove this, because the pairing does
-not extend to the opponents. Measured by running one configuration three times
-(`p19b`, `final_tabular_q`, `repeat_c`), the run-to-run difference reaches
-**t = 3.45 on score with no change at all**.
+not extend to the opponents.
 
-So on the four-agent board `|t| ~ 2` means nothing, and only differences well
-clear of the floor are treated as real. Solo comparisons are unaffected - with no
-opponents the runs are deterministic.
+One configuration was therefore run three times (`p19b`, `final_tabular_q`,
+`repeat_c`), giving scores of 2.379, 2.221 and 2.224 - a **run-to-run standard
+deviation of 0.090** on the mean.
+
+The paired t statistic is unreliable against this: the same difference of -0.16
+gives t = -3.45 in one pairing and t = -0.70 in another, because paired standard
+errors assume the pairing removes the noise and here it does not. So four-agent
+comparisons are judged by **effect size against the run-to-run spread**: a
+difference `d` between two single runs has a null standard error of about
+`0.090 * sqrt(2) = 0.127`.
+
+| comparison | difference in score | z against the noise floor |
+|---|---|---|
+| Phase 16, opponents block moves | +0.424 | 3.3 |
+| Phase 17a, all training with opponents | +0.435 | 3.4 |
+| Phase 18, D4 symmetry | +0.456 | 3.6 |
+| Phase 20, `bomb_safety` | -0.617 | -4.9 |
+| Phase 21, best search candidate | +0.044 | 0.3 |
+
+Solo comparisons are unaffected: with no opponents on the board the runs are
+deterministic and repeat exactly.
 
 ---
 
