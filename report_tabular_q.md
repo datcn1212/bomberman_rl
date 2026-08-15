@@ -49,9 +49,20 @@ Step size `alpha / (1 + n(s,a)/half_life)`, counted per (state, action) pair.
 
 **Protocol** - training seeds `1000+k`; evaluation seeds `9001..9030`, disjoint.
 FAST mode = 30 seeds x 20 rounds. Configs are compared **paired on the same
-seeds**; a difference under ~2 standard errors is not called a difference. Most
-comparisons use 10 seeds, because between-seed variance is as large as the
-effects being measured.
+seeds**. Most comparisons use 10 seeds, because between-seed variance is as large
+as the effects being measured.
+
+**Noise floor with opponents.** `rule_based_agent` re-seeds itself from system
+entropy, so two runs of an *identical* configuration do not repeat: the opponents
+behave differently across 6000 training episodes and our agent learns a different
+table. Pairing on the training seed does not remove this, because the pairing does
+not extend to the opponents. Measured by running one configuration three times
+(`p19b`, `final_tabular_q`, `repeat_c`), the run-to-run difference reaches
+**t = 3.45 on score with no change at all**.
+
+So on the four-agent board `|t| ~ 2` means nothing, and only differences well
+clear of the floor are treated as real. Solo comparisons are unaffected - with no
+opponents the runs are deterministic.
 
 ---
 
