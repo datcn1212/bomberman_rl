@@ -79,6 +79,7 @@ effects being measured.
 | 17b | death penalty -5 -> -15 | score -0.50, kills -0.03 | **rejected** |
 | 18 | is D4 still needed with opponents? | score +0.46 (t=3.79), coins +0.48 (t=9.44) | **kept** |
 | 19 | halve the training budget to 6000 | coins unchanged (t=0.30) | **kept** |
+| 20 | `bomb_safety`: count escape routes | score -0.62 (t=-7.1), bombs +54% | **rejected** |
 
 ---
 
@@ -730,6 +731,66 @@ Half the episodes, everything else identical, 10 seeds:
 Coins are unchanged. **Half the budget buys the same agent**, which halves the
 cost of every experiment from here on - the point at which that matters most,
 because the hyperparameter search is next.
+
+---
+
+## Phase 20 - can the agent learn to bomb safely rather than bomb less?
+
+Three interventions aimed at dying less (wasted-bomb -0.6, death -15, Double Q)
+all bought safety by suppressing bombing. The diagnosis was that the reward pays
+for the distinction between a safe bomb and a reckless one while the state cannot
+express it: `escape_dir` is binary, so a bomb with one way out and a bomb with
+three look identical.
+
+`bomb_safety` reuses the dormant `bomb_opt` slot - no radix added - to report how
+many distinct escape routes a bomb here would leave: none / trapped / exactly one
+/ two or more.
+
+| | score | coins | kills | self-kill | bombs |
+|---|---|---|---|---|---|
+| control | **2.492** | **1.913** | 0.116 | 0.471 | 20.69 |
+| + `bomb_safety` | 1.875 | 1.361 | 0.103 | 0.564 | **31.92** |
+
+| metric | paired diff | t | seeds better |
+|---|---|---|---|
+| score | -0.617 +/- 0.087 | **-7.11** | 0/10 |
+| coins | -0.553 +/- 0.060 | -9.19 | 0/10 |
+| self-kill | +0.094 +/- 0.021 | +4.50 | 1/10 |
+| bombs | **+11.23 +/- 1.28** | +8.76 | 10/10 |
+
+The intent was selective bombing; the result is 54% **more** bombing, more deaths
+and less score. Weighting the learned rows by visits shows why:
+
+| `bomb_safety` reports | share of time | BOMB is greedy there |
+|---|---|---|
+| no bomb available | 77.7% | 0.1% |
+| trapped | 0.9% | 0.6% |
+| **exactly one route** | **0.8%** | 6.8% |
+| two or more routes | 20.5% | **69.3%** |
+
+The distinction the component was built to draw **barely occurs**: the "one route
+only" case covers 0.8% of steps. On an open board a bomb almost always leaves two
+or more ways out at the moment it is dropped, so in practice the component reports
+"robust" whenever a bomb is available - and the agent reads that as permission.
+
+The flaw is in the question, not the implementation. Escape routes are counted
+against the *hypothetical schedule containing only this bomb*. The danger that
+actually kills comes from bombs the three opponents drop **afterwards**, which no
+static count at drop time can see. A measure of present freedom is being used as a
+proxy for future risk, and with three other agents acting it is a poor one.
+
+This is the third component placed in this slot to fail, after `bomb_opt` and an
+earlier "does this bomb trap an opponent" variant. All three answer "what would
+happen if I bombed here" by evaluating a static board, and all three are wrong for
+the same reason.
+
+**Decision.** Rejected; the slot stays dormant.
+
+**Comment.** The honest reading of the original question - can the agent learn to
+bomb safely instead of bombing less - is that this attempt does not answer it. The
+information that would separate a safe bomb from a reckless one is a prediction
+about what the opponents will do, and none of the features tried so far are
+predictions; they are all measurements of the current board.
 
 ---
 
