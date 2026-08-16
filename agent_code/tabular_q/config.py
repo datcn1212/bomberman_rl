@@ -20,6 +20,11 @@ class Config:
     # sum(alpha^2) < inf: the estimate never settles, it random-walks around the
     # true value forever. "visit" divides by the visit count of the individual
     # (state, action) pair, which satisfies it.
+    # Which value the bootstrap uses for the next state.
+    #   "q"      off-policy: max over legal actions, the greedy value
+    #   "sarsa"  on-policy: the action actually taken next, so the estimate
+    #            includes the cost of the agent's own exploration
+    target: str = "q"
     alpha_schedule: str = "visit"
     alpha_half_life: float = 1000.0
 

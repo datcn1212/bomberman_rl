@@ -26,9 +26,11 @@ from .model import observe_and_encode, to_frame
 
 
 class Transition:
-    __slots__ = ("step", "state", "action", "reward", "next_state", "terminal", "coins", "crates", "bombs")
+    __slots__ = ("step", "state", "action", "reward", "next_state", "next_perm",
+                 "terminal", "coins", "crates", "bombs")
 
-    def __init__(self, step, state, action, reward, next_state, terminal, coins, crates, bombs):
+    def __init__(self, step, state, action, reward, next_state, terminal, coins,
+                 crates, bombs, next_perm=None):
         self.step = step
         self.state = state
         self.action = action
@@ -38,6 +40,10 @@ class Transition:
         self.coins = coins
         self.crates = crates
         self.bombs = bombs
+        # The frame `next_state` is written in. SARSA bootstraps from the action
+        # actually taken there, and that action has to be translated into this
+        # frame, not the frame of the state the transition started from.
+        self.next_perm = next_perm
 
 
 def setup_training(self):
@@ -111,8 +117,13 @@ def reward_from(self, events, old_game_state=None):
     return reward
 
 
-def _flush(self):
-    """Apply the Q-learning update for the staged transition, if any."""
+def _flush(self, next_action=None):
+    """Apply the update for the staged transition, if any.
+
+    `next_action` is the real action taken in the transition's successor state.
+    The staging already makes it available: when this runs from
+    `game_events_occurred`, the call's own action is the successor's action.
+    """
     t = self.pending
     self.pending = None
     if t is None:
@@ -126,6 +137,11 @@ def _flush(self):
     self.bombs_dropped += t.bombs
     if t.terminal:
         target = t.reward
+    elif self.cfg.target == "sarsa" and next_action is not None:
+        # On-policy: bootstrap from what the agent will actually do next, which
+        # includes its exploratory mistakes, rather than from the best case.
+        taken = to_frame(t.next_perm, next_action)
+        target = t.reward + self.cfg.gamma * float(self.model.values(t.next_state)[taken])
     else:
         # Max over legal actions only. With BOMB masked out its row stays at
         # zero, and a plain max would bootstrap from that zero whenever every
@@ -140,9 +156,9 @@ def _flush(self):
 def game_events_occurred(self, old_game_state, self_action, new_game_state, events):
     if old_game_state is None or self_action is None:
         return
-    _flush(self)
+    _flush(self, ACTIONS.index(self_action))
     old_index, old_obs, old_perm = observe_and_encode(old_game_state, self.cfg.use_symmetry)
-    new_index, new_obs, _ = observe_and_encode(new_game_state, self.cfg.use_symmetry)
+    new_index, new_obs, new_perm = observe_and_encode(new_game_state, self.cfg.use_symmetry)
     shaping = (self.cfg.gamma * _potential(self, new_obs)) - _potential(self, old_obs)
     self.pending = Transition(
         step=old_game_state["step"],
@@ -154,6 +170,7 @@ def game_events_occurred(self, old_game_state, self_action, new_game_state, even
         coins=events.count(e.COIN_COLLECTED),
         crates=events.count(e.CRATE_DESTROYED),
         bombs=events.count(e.BOMB_DROPPED),
+        next_perm=new_perm,
     )
 
 
@@ -164,7 +181,7 @@ def end_of_round(self, last_game_state, last_action, events):
             # version, which carries the complete event list.
             self.pending = None
         else:
-            _flush(self)
+            _flush(self, ACTIONS.index(last_action))
         # Terminal transition: Ng et al. require Phi(terminal) = 0 for the
         # policy-invariance guarantee, so the shaping term is just -Phi(s).
         last_index, last_obs, last_perm = observe_and_encode(
