@@ -108,6 +108,7 @@ deterministic and repeat exactly.
 | 19 | halve the training budget to 6000 | coins unchanged (t=0.30) | **kept** |
 | 20 | `bomb_safety`: count escape routes | score -0.62 (t=-7.1), bombs +54% | **rejected** |
 | 21 | random hyperparameter search, 13 candidates | nothing beats the current defaults | **kept as is** |
+| 22 | four ideas from an earlier tabular study | three hurt, one neutral | **all rejected** |
 
 ---
 
@@ -859,6 +860,57 @@ had already been the subject of its own experiment.
 
 **Decision.** Keep the configuration unchanged, and fold it into `config.py` as
 the defaults, since the tournament runs the agent with no config file.
+
+---
+
+## Phase 22 - four ideas carried over from an earlier tabular study
+
+An earlier study of the same game reached a stronger four-agent agent with a
+state this branch never tried: one step of memory, an opponent-distance band, a
+five-way bomb classification separating "reaches an opponent" from "clears
+crates", and a three-phase curriculum. Each was tested here as a single change
+against the control, which is the current configuration measured three times
+(2.275).
+
+| arm | score | coins | kills | self-kill | z against the noise floor |
+|---|---|---|---|---|---|
+| **control** | **2.275** | **1.803** | 0.095 | 0.489 | - |
+| curriculum, opponent phase matched | 2.102 | 1.612 | 0.098 | 0.492 | -1.35 |
+| opponent distance (none/far/near) | 1.993 | 1.599 | 0.079 | 0.415 | -2.21 |
+| `last_move`, one step of memory | 1.878 | 1.410 | 0.094 | 0.535 | -3.10 |
+| five-way `bomb_hits` | 1.606 | 1.112 | 0.099 | 0.483 | -5.23 |
+
+**The curriculum is neutral** (z = -1.35, inside the floor). A first attempt at it
+looked catastrophic (-5.48) because holding the episode total fixed and splitting
+it three ways left only 2000 opponent episodes against the control's 6000, and
+Phase 17a had already shown opponent exposure to be worth more than that. Matching
+the opponent phase at 6000 and prepending the warm-up removes the effect.
+
+**The three state components all hurt**, and the reason is visible in the table:
+
+| arm | rows | score |
+|---|---|---|
+| control | 336 | 2.275 |
+| curriculum | 348 | 2.102 |
+| opponent distance | 680 | 1.993 |
+| `last_move` | 854 | 1.878 |
+| `bomb_hits` | 758 | 1.606 |
+
+Correlation between table size and score across these arms: **-0.80**. Median
+visits per row falls from about 40 to 10-14.
+
+This is the Phase 5 lesson again, now with a fifth and sixth instance: a state
+component costs resolution across the whole space and pays only where it changes
+the decision. What is new is *why the earlier study could afford them*. That agent
+had no D4 canonicalisation, so its table was already large and each extra
+component was a smaller relative increase. Here symmetry had compressed the table
+to ~336 rows, and every component undoes a share of exactly the compression that
+makes it work.
+
+**Comment.** The two designs are not better and worse versions of one thing; they
+sit in different regimes. A richer state with more data and no symmetry is one
+coherent design, and a compressed symmetric state with less data is another.
+Transplanting a component from the first into the second measures neither.
 
 ---
 

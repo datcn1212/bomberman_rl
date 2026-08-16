@@ -1,0 +1,9 @@
+{
+  "continue_from": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p22e_curriculum/seed6/model_phase0.pkl",
+  "eps_start": 0.25,
+  "git_commit": "1221954",
+  "log_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p22e_curriculum/seed6/phase1_classic.csv",
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p22e_curriculum/seed6/model_phase1.pkl",
+  "n_episodes": 2000,
+  "seed": 1583
+}
