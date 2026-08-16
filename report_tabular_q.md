@@ -862,6 +862,62 @@ the defaults, since the tournament runs the agent with no config file.
 
 ---
 
+## Final result
+
+The shipped model is `experiments/final_tabular_q/seed10/model.pkl`, chosen on
+arenas 9101-9130 and reported below on arenas 9001-9600, which took no part in
+choosing it. **600 rounds per setting, EXACT mode**, so survival and win rate are
+counted rather than inferred. `rule_based_agent` was measured in the identical
+settings as the reference.
+
+| setting | metric | tabular Q | `rule_based_agent` |
+|---|---|---|---|
+| **Task 2, solo** | coins (of 9) | 7.767 +/- 2.284 | **8.532 +/- 0.693** |
+| | self-kill | **0.000** | **0.000** |
+| | survival | **1.000** | **1.000** |
+| **Task 4, 1v1** | score | 3.842 | **4.775** |
+| | win rate | 0.333 | **0.508** |
+| | survival | 0.487 | **0.565** |
+| **Task 4, four agents** | score | 2.488 | **3.012** |
+| | win rate | 0.153 | **0.195** |
+| | self-kill | **0.447** | 0.555 |
+| | survival | **0.437** | 0.373 |
+| | crates | **39.76** | 30.24 |
+| | coins | 1.955 | **2.203** |
+
+Win-rate differences at n = 600:
+
+| setting | difference | z |
+|---|---|---|
+| 1v1 | -0.175 +/- 0.028 | **-6.24** |
+| four agents | -0.042 +/- 0.022 | -1.92 |
+
+**The agent is behind the reference, and closest where it matters.** In the
+four-agent setting - the tournament shape - the win-rate gap is 0.042 at
+z = -1.92, which is not a clear separation. In 1v1 the gap is decisive.
+
+Two things in the four-agent column deserve attention, because they point the
+opposite way to the score:
+
+* the agent **survives better than the reference** (0.437 against 0.373) and
+  kills itself less (0.447 against 0.555), so it is not losing by recklessness;
+* it destroys **31% more crates** (39.76 against 30.24) and still collects
+  **fewer coins** (1.955 against 2.203).
+
+Doing more work and converting less of it is a collection problem, not a
+demolition problem: the agent opens crates and then fails to reach what it
+uncovered before an opponent does. Every remaining phase attacked bombing, danger
+and exploration; none attacked the route between a revealed coin and the agent
+while three others contest it. That is where the next gain lives, and it is not
+somewhere this log looked.
+
+The solo column carries its own caveat: 7.767 here against 8.88 in Phase 12. That
+is not a regression - Phase 12's model was trained solo, this one was trained
+against three opponents, and specialising for the crowded board costs something
+on the empty one.
+
+---
+
 ## Settings currently in force
 
 ```
