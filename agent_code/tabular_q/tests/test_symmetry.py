@@ -172,3 +172,20 @@ def test_states_sharing_a_step_number_are_encoded_separately():
     index_after, obs_after, _ = observe_and_encode(after, use_symmetry=False)
     assert obs_before.t_here != obs_after.t_here
     assert index_before != index_after
+
+
+def test_last_move_rotates_with_the_frame():
+    """last_move is a direction, so canonicalisation must relabel it too."""
+    from agent_code.tabular_q.features import FLAGS
+    FLAGS["use_last_move"] = True
+    try:
+        field = open_field(11, 11)
+        state = make_state(field, (5, 5), coins=[(7, 5)])
+        # Same board, same everything, but arriving from two different sides
+        # must not collapse onto one row.
+        from agent_code.tabular_q.features import observe
+        a = canonical(observe(state, last_move=1))[0]     # arrived going UP
+        b = canonical(observe(state, last_move=2))[0]     # arrived going RIGHT
+        assert a != b
+    finally:
+        FLAGS["use_last_move"] = False

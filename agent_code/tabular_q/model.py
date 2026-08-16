@@ -26,11 +26,13 @@ RADIX_T_HERE = 5         # decisions until this tile burns; 0 = it does not
 RADIX_TARGET_DIR = 6     # none, 4 directions, or "already there"
 RADIX_TARGET_KIND = 3    # crate, coin, opponent
 RADIX_ESCAPE_DIR = 6     # none, 4 directions, or "staying put is safe"
-RADIX_BOMB_OPT = 4       # unavailable, pointless, useful, self-trapping
+RADIX_BOMB_OPT = 5       # unavailable, pointless, crate, opponent, trapped
+RADIX_OPPONENT = 3       # no opponent reachable, far, within five steps
+RADIX_LAST_MOVE = 5      # none, or the direction the agent arrived from
 
 LAYOUT = (RADIX_MOVE, RADIX_T_HERE, RADIX_TARGET_DIR, RADIX_TARGET_KIND,
-          RADIX_ESCAPE_DIR, RADIX_BOMB_OPT)
-FEATURE_VERSION = 4
+          RADIX_ESCAPE_DIR, RADIX_BOMB_OPT, RADIX_OPPONENT, RADIX_LAST_MOVE)
+FEATURE_VERSION = 5
 
 N_STATES = int(np.prod(LAYOUT))
 N_ACTIONS = len(ACTIONS)
@@ -43,7 +45,8 @@ _UNSEEN_COUNTS = np.zeros(N_ACTIONS, dtype=np.int64)
 _UNSEEN_COUNTS.flags.writeable = False
 
 
-def encode_parts(move_status, t_here, target_dir, target_kind, escape_dir, bomb_opt):
+def encode_parts(move_status, t_here, target_dir, target_kind, escape_dir,
+                 bomb_opt, opponent=0, last_move=0):
     """Mixed-radix index of a raw feature tuple."""
     move = 0
     for i in range(4):
@@ -54,12 +57,15 @@ def encode_parts(move_status, t_here, target_dir, target_kind, escape_dir, bomb_
     index = index * RADIX_TARGET_KIND + target_kind
     index = index * RADIX_ESCAPE_DIR + escape_dir
     index = index * RADIX_BOMB_OPT + bomb_opt
+    index = index * RADIX_OPPONENT + opponent
+    index = index * RADIX_LAST_MOVE + last_move
     return index
 
 
 def encode(obs):
     return encode_parts(obs.move_status, obs.t_here, obs.target_dir,
-                        obs.target_kind, obs.escape_dir, obs.bomb_opt)
+                        obs.target_kind, obs.escape_dir, obs.bomb_opt,
+                        obs.opponent, obs.last_move)
 
 
 # --- dihedral symmetry ----------------------------------------------------
@@ -103,8 +109,10 @@ def _relabel(perm, obs):
         # DIR_NONE (0) and DIR_HERE (5) carry no direction.
         return value if value in (0, 5) else perm[value - 1] + 1
 
+    # last_move is a direction too, so it rotates with everything else.
     return encode_parts(status, obs.t_here, direction(obs.target_dir),
-                        obs.target_kind, direction(obs.escape_dir), obs.bomb_opt)
+                        obs.target_kind, direction(obs.escape_dir), obs.bomb_opt,
+                        obs.opponent, direction(obs.last_move))
 
 
 def canonical(obs):
@@ -206,7 +214,7 @@ class QModel:
         return model
 
 
-def observe_and_encode(game_state, use_symmetry):
+def observe_and_encode(game_state, use_symmetry, last_move=0):
     """The observation, its table index, and the frame that index is written in.
 
     With symmetry off the frame is the identity and the index is the plain
@@ -218,7 +226,7 @@ def observe_and_encode(game_state, use_symmetry):
     position is unchanged - exactly the case that matters, standing still inside
     a blast.
     """
-    obs = observe(game_state)
+    obs = observe(game_state, last_move)
     if use_symmetry:
         index, perm = canonical(obs)
         return index, obs, perm

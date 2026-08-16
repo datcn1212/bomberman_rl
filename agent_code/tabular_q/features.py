@@ -51,13 +51,25 @@ BOMB_NONE, BOMB_POINTLESS, BOMB_USEFUL, BOMB_TRAPPED = 0, 1, 2, 3
 # are very different risks - and the binary escape_dir cannot tell them apart.
 SAFE_NONE, SAFE_TRAPPED, SAFE_TIGHT, SAFE_ROBUST = 0, 1, 2, 3
 
+# bomb_opt, five-way variant: separates a bomb that reaches an opponent from one
+# that only clears crates. The four-way version tested earlier had no such
+# category, so "is a bomb that can hit someone worth distinguishing" was never
+# actually asked.
+HIT_NONE, HIT_POINTLESS, HIT_CRATE, HIT_OPPONENT, HIT_TRAPPED = 0, 1, 2, 3, 4
+
+# How far an opponent has to be before it stops mattering, in BFS steps.
+OPPONENT_NEAR = 5
+OPP_NONE, OPP_FAR, OPP_NEAR = 0, 1, 2
+
 # Which optional state components are switched on. Set once at setup and stored
 # inside the model, so that a model is always evaluated with the same
 # observation it was trained on. Holding a component at a constant value
 # collapses it out of the encoding without changing LAYOUT, which is what makes
 # a clean ablation possible.
 FLAGS = {"use_bomb_opt": False, "use_opponent_blocking": False,
-         "use_bomb_safety": False, "use_exact_escape": False}
+         "use_bomb_safety": False, "use_exact_escape": False,
+         "use_bomb_hits": False, "use_opponent_distance": False,
+         "use_last_move": False}
 
 
 def blast_tiles(field, x, y):
@@ -291,7 +303,7 @@ class Board:
                 return min(k + 1, 4)
         return 0
 
-    def target_search(self, coins):
+    def target_search(self, coins, goals=None):
         """Shortest path to the nearest coin, or to a tile next to a crate.
 
         One search, two goal tests: standing on a coin, or standing next to a
@@ -303,10 +315,11 @@ class Board:
         path through them is exactly what makes an agent walk into a blast on
         its way to a coin.
         """
-        coin_goals = set(coins)
+        coin_goals = set(goals) if goals is not None else set(coins)
+        crate_goals = goals is None
         if self.pos in coin_goals:
             return DIR_HERE, KIND_COIN, 0
-        if self._next_to_crate(self.pos):
+        if crate_goals and self._next_to_crate(self.pos):
             return DIR_HERE, KIND_CRATE, 0
 
         queue = deque()
@@ -321,7 +334,7 @@ class Board:
             tile, first_move, dist = queue.popleft()
             if tile in coin_goals:
                 return first_move, KIND_COIN, min(dist, 15)
-            if self._next_to_crate(tile):
+            if crate_goals and self._next_to_crate(tile):
                 return first_move, KIND_CRATE, min(dist, 15)
             for nxt in self.neighbours(*tile):
                 if nxt not in seen and not self._soon_lethal(nxt):
@@ -333,6 +346,33 @@ class Board:
         """How many crates a bomb dropped here would destroy."""
         return sum(1 for tx, ty in blast_tiles(self.field, *self.pos)
                    if self.field[tx, ty] == 1)
+
+    def opponent_state(self, others):
+        """Whether the nearest opponent is absent, far, or within reach.
+
+        Distance is the walking distance, not the straight line: an opponent two
+        tiles away across a wall is not two steps away.
+        """
+        if not others:
+            return OPP_NONE
+        direction, _, dist = self.target_search([], goals=set(others))
+        if direction == DIR_NONE:
+            return OPP_FAR
+        return OPP_NEAR if dist <= OPPONENT_NEAR else OPP_FAR
+
+    def bomb_hits(self, game_state):
+        """What a bomb dropped here would reach: nothing, crates, or an opponent."""
+        if not game_state["self"][2]:
+            return HIT_NONE
+        tiles = set(blast_tiles(self.field, *self.pos))
+        others = {tuple(o[3]) for o in game_state["others"]}
+        crates = sum(1 for tx, ty in tiles if self.field[tx, ty] == 1)
+        if not crates and not (tiles & others):
+            return HIT_POINTLESS
+        hypothetical = Board(game_state, extra_bomb=self.pos)
+        if hypothetical.escape_search() == DIR_NONE:
+            return HIT_TRAPPED
+        return HIT_OPPONENT if (tiles & others) else HIT_CRATE
 
     def _next_to_crate(self, tile):
         x, y = tile
@@ -349,16 +389,20 @@ class Board:
 
 class Observation:
     __slots__ = ("move_status", "t_here", "target_dir", "target_kind",
-                 "escape_dir", "bomb_opt", "target_dist", "pos")
+                 "escape_dir", "bomb_opt", "opponent", "last_move",
+                 "target_dist", "pos")
 
     def __init__(self, move_status, t_here, target_dir, target_kind,
-                 escape_dir, bomb_opt, target_dist, pos):
+                 escape_dir, bomb_opt, target_dist, pos,
+                 opponent=OPP_NONE, last_move=DIR_NONE):
         self.move_status = move_status
         self.t_here = t_here
         self.target_dir = target_dir
         self.target_kind = target_kind
         self.escape_dir = escape_dir
         self.bomb_opt = bomb_opt
+        self.opponent = opponent
+        self.last_move = last_move
         self.target_dist = target_dist
         self.pos = pos
 
@@ -395,7 +439,7 @@ def crate_positions(field):
     return [(int(x), int(y)) for x, y in zip(*np.nonzero(field == 1))]
 
 
-def observe(game_state):
+def observe(game_state, last_move=DIR_NONE):
     board = Board(game_state)
     x, y = board.pos
 
@@ -410,15 +454,20 @@ def observe(game_state):
             move_status.append(FREE_SAFE)
 
     target_dir, target_kind, target_dist = board.target_search(board.coins)
+    others = [tuple(o[3]) for o in game_state["others"]]
     return Observation(
         move_status=tuple(move_status),
         t_here=board.steps_until_lethal(),
         target_dir=target_dir,
         target_kind=target_kind,
         escape_dir=board.escape_search(),
-        bomb_opt=(bomb_safety(game_state, board) if FLAGS["use_bomb_safety"]
+        bomb_opt=(board.bomb_hits(game_state) if FLAGS["use_bomb_hits"]
+                  else bomb_safety(game_state, board) if FLAGS["use_bomb_safety"]
                   else bomb_option(game_state, board) if FLAGS["use_bomb_opt"]
                   else BOMB_NONE),
+        opponent=(board.opponent_state(others) if FLAGS["use_opponent_distance"]
+                  else OPP_NONE),
+        last_move=last_move if FLAGS["use_last_move"] else DIR_NONE,
         target_dist=target_dist,
         pos=board.pos,
     )

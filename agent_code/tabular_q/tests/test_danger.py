@@ -17,8 +17,10 @@ sys.path.insert(0, str(ROOT))
 import settings as s  # noqa: E402
 from agent_code.tabular_q.features import (  # noqa: E402
     BLOCKED, BOMB_NONE, BOMB_POINTLESS, BOMB_TRAPPED, BOMB_USEFUL, DIR_HERE,
-    DIR_NONE, FLAGS, FREE_LETHAL, FREE_SAFE, HORIZON, SAFE_NONE, SAFE_ROBUST,
-    SAFE_TIGHT, SAFE_TRAPPED, Board, blast_tiles, danger_schedule, observe)
+    DIR_NONE, FLAGS, FREE_LETHAL, FREE_SAFE, HIT_CRATE, HIT_NONE,
+    HIT_OPPONENT, HIT_POINTLESS, HORIZON, OPP_FAR, OPP_NEAR, OPP_NONE,
+    SAFE_NONE, SAFE_ROBUST, SAFE_TIGHT, SAFE_TRAPPED, Board, blast_tiles,
+    danger_schedule, observe)
 
 
 @pytest.fixture
@@ -314,3 +316,62 @@ def test_bomb_safety_counts_routes_not_just_existence(bomb_safety_on):
     field[2, 4] = 0
     roomier = Board(make_state(field, (2, 2)), extra_bomb=(2, 2)).escape_routes()
     assert roomier > tight
+
+
+@pytest.fixture
+def opponent_distance_on():
+    FLAGS["use_opponent_distance"] = True
+    FLAGS["use_opponent_blocking"] = True
+    yield
+    FLAGS["use_opponent_distance"] = False
+    FLAGS["use_opponent_blocking"] = False
+
+
+@pytest.fixture
+def bomb_hits_on():
+    FLAGS["use_bomb_hits"] = True
+    yield
+    FLAGS["use_bomb_hits"] = False
+
+
+def test_opponent_state_none_when_alone(opponent_distance_on):
+    assert observe(make_state(open_field(13, 13), (6, 6))).opponent == OPP_NONE
+
+
+def test_opponent_state_near_and_far(opponent_distance_on):
+    field = open_field(15, 15)
+    near = observe(make_state(field, (6, 6), others=[other((6, 9))]))
+    far = observe(make_state(field, (2, 2), others=[other((12, 12))]))
+    assert near.opponent == OPP_NEAR      # three steps
+    assert far.opponent == OPP_FAR        # twenty steps
+
+
+def test_opponent_distance_is_walking_distance_not_straight_line(opponent_distance_on):
+    """An opponent just across a wall is not two steps away."""
+    field = open_field(15, 15)
+    field[:, 7] = -1                       # full wall between the two halves
+    obs = observe(make_state(field, (6, 6), others=[other((6, 8))]))
+    assert obs.opponent == OPP_FAR
+
+
+def test_bomb_hits_separates_opponent_from_crate(bomb_hits_on):
+    field = open_field(13, 13)
+    field[7, 6] = 1
+    assert observe(make_state(field, (6, 6))).bomb_opt == HIT_CRATE
+
+    plain = open_field(13, 13)
+    assert observe(make_state(plain, (6, 6),
+                              others=[other((8, 6))])).bomb_opt == HIT_OPPONENT
+
+
+def test_bomb_hits_pointless_when_it_reaches_neither(bomb_hits_on):
+    field = open_field(13, 13)
+    assert observe(make_state(field, (6, 6))).bomb_opt == HIT_POINTLESS
+
+
+def test_bomb_hits_reports_no_bomb(bomb_hits_on):
+    field = open_field(13, 13)
+    field[7, 6] = 1
+    state = make_state(field, (6, 6))
+    state["self"] = ("me", 0, False, (6, 6))
+    assert observe(state).bomb_opt == HIT_NONE

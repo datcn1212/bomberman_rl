@@ -67,6 +67,17 @@ class Config:
     # off from one it cannot, which is what makes bombing risky in a crowd.
     use_bomb_safety: bool = False
 
+    # Five-way bomb classification that separates "reaches an opponent" from
+    # "clears crates". The four-way version had no such category.
+    use_bomb_hits: bool = False
+
+    # Whether the nearest opponent is absent, far, or within five walking steps.
+    use_opponent_distance: bool = False
+
+    # One step of memory: the direction the agent arrived from. Without it a
+    # greedy policy can oscillate between two tiles, since both look identical.
+    use_last_move: bool = False
+
     # Settle the escape question by backward induction over (tile, step) instead
     # of a frontier search. More complete, but measured at 1.6x the cost for a
     # disagreement in 0.4% of dangerous states, so it stays off.
