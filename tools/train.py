@@ -42,8 +42,10 @@ def code_fingerprint():
     try:
         head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
                               capture_output=True, text=True).stdout.strip()
-        dirty = subprocess.run(["git", "status", "--porcelain", "--",
-                                "agent_code/tabular_q"], cwd=ROOT,
+        # Only tracked source counts: the harness writes scratch configs into
+        # the agent folder, and those say nothing about which code ran.
+        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no",
+                                "--", "agent_code/tabular_q"], cwd=ROOT,
                                capture_output=True, text=True).stdout.strip()
     except Exception:
         return "unknown"
