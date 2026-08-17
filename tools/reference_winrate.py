@@ -1,10 +1,10 @@
 """Re-measure the reference agents' win rate at the same sample size we report
 for our own agent.
 
-The S0 baseline played 30 rounds; every q_bomber number is five seeds of 30, so
-150. A win rate over 30 rounds carries a standard error near 0.09, which is far
-too wide to say whether 0.460 beats 0.433. This repeats the 30-seed EXACT
-protocol five times, on disjoint seed blocks, for a like-for-like comparison.
+A win rate over 30 rounds carries a standard error near 0.09, which is far too
+wide to say whether 0.460 beats 0.433. Our own figures are five seeds of 30
+rounds, so this repeats the 30-seed EXACT protocol five times as well, on
+disjoint seed blocks, for a like-for-like comparison.
 
     python3 tools/reference_winrate.py
 """
