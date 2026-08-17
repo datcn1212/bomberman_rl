@@ -106,6 +106,13 @@ class Config:
     reward_killed_self: float = -5.0
     reward_got_killed: float = -5.0
     reward_survived: float = 0.0
+    # Charged while standing in a blast with no escape route at all. Unlike a
+    # flat death penalty this fires before the agent dies, on the step where the
+    # situation is still legible, so it can be attributed to what caused it.
+    reward_trapped: float = 0.0
+    # Charged for dropping a bomb that leaves no escape - the decision, rather
+    # than the situation it creates.
+    reward_bomb_no_escape: float = 0.0
 
     # --- potential-based shaping -----------------------------------------
     # F(s, a, s') = gamma * Phi(s') - Phi(s) with Phi(s) = -w * distance to the

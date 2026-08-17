@@ -91,6 +91,19 @@ def _wasted_bomb(old_game_state, events):
     return Board(old_game_state).bomb_payload() == 0
 
 
+def _is_trapped(game_state):
+    """Standing inside a blast schedule with no surviving move."""
+    return Board(game_state).escape_search() == DIR_NONE
+
+
+def _bomb_without_escape(old_game_state, events):
+    """A bomb was dropped and nothing survives the blast it creates."""
+    if e.BOMB_DROPPED not in events:
+        return False
+    pos = old_game_state["self"][3]
+    return Board(old_game_state, extra_bomb=pos).escape_search() == DIR_NONE
+
+
 def reward_from(self, events, old_game_state=None):
     """Map a step's events onto a scalar reward.
 
@@ -116,8 +129,13 @@ def reward_from(self, events, old_game_state=None):
         reward += cfg.reward_got_killed
     if e.SURVIVED_ROUND in events:
         reward += cfg.reward_survived
-    if old_game_state is not None and _wasted_bomb(old_game_state, events):
-        reward += cfg.reward_bomb_wasted
+    if old_game_state is not None:
+        if _wasted_bomb(old_game_state, events):
+            reward += cfg.reward_bomb_wasted
+        if cfg.reward_trapped and _is_trapped(old_game_state):
+            reward += cfg.reward_trapped
+        if cfg.reward_bomb_no_escape and _bomb_without_escape(old_game_state, events):
+            reward += cfg.reward_bomb_no_escape
     return reward
 
 
