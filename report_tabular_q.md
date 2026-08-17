@@ -974,6 +974,36 @@ successive attempts at this replication failed - 1.039, then 1.807, then 1.671 -
 because each was rebuilt from an *idea* of the other configuration rather than
 from its source. The version that worked read the exact file at the exact commit.
 
+## Phase 24 - the same models on the four-agent board
+
+Every figure in Phase 23 is a 1v1 score, and the tournament is played with four
+agents. The ten replicated models were therefore re-measured on the four-agent
+board under the protocol used for every other four-agent number here (30 arenas
+x 20 rounds, three `rule_based_agent` opponents).
+
+| configuration | 1v1 | four agents |
+| --- | --- | --- |
+| this branch's own defaults | 2.919 | 2.275 |
+| the replicated configuration | 3.727 | **2.264** |
+| difference | **+0.808** | **-0.011** |
+
+The whole benefit of the replicated recipe is 1v1. On the four-agent board it is
+0.09 of the null standard error, which is nothing.
+
+**Comment.** This is a result about the measurement, not about the recipe. A 1v1
+score separates agents that the tournament condition does not separate, so
+tuning against it can buy improvements that do not exist where they matter. Every
+conclusion in Phases 21-23 was reached on 1v1 numbers and inherits this caveat;
+none of them is contradicted, but none of them is evidence of tournament
+strength either. Ranking by 1v1 remains useful for the *diagnostic* it supports -
+it is what localised the residual to coin collection - and should not be used
+for selecting what to ship.
+
+A second measurement, taken on a sibling branch, points the same way: an
+on-policy version of this same recipe scores 3.575 at 1v1 and 2.255 on the four
+agent board, statistically identical to the 2.264 here despite a 0.15 difference
+at 1v1.
+
 ---
 
 ## Final result
