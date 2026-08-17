@@ -82,6 +82,70 @@ deterministic and repeat exactly.
 
 ---
 
+## Tooling
+
+Nineteen scripts in `tools/`, each written for one job that came up in a phase.
+They are listed here because the apparatus is part of the method: several
+conclusions in this log depend on what these measure and on the protocol they
+enforce.
+
+**Measuring the environment** - run once, before any learning code existed.
+
+| | |
+|---|---|
+| `verify_mechanics.py` | bomb timing, how long smoke kills, whether blasts turn corners |
+| `verify_events.py` | how the framework delivers training callbacks (Phase 0) |
+
+**Running experiments.** `evaluate.py` is the library; the rest drive it.
+
+| | |
+|---|---|
+| `train.py` | runs a curriculum of phases over several seeds in parallel, writing each phase's full config next to its model |
+| `evaluate.py` | plays an agent under the fixed protocol and turns the framework's stats into metrics and a registry row |
+| `eval_existing.py` | re-measures models already on disk, without retraining |
+| `hpsearch.py` | random search with successive halving (Phase 21) |
+
+**Diagnosis** - used when a result was not what was expected.
+
+| | |
+|---|---|
+| `inspect_policy.py` | decodes the table into a readable policy; found the single row that was costing 82% of the score |
+| `analyse_bombs.py` | what the agent's bombs actually achieve, which the crate count alone hides |
+| `analyse_symmetry.py` | how much of the table is one situation seen from another angle |
+| `plot_curves.py` | learning curves from the per-episode logs |
+
+**Choosing and shipping a model.**
+
+| | |
+|---|---|
+| `select_final.py` | picks which seed to ship, on arenas not used to rank them |
+| `final_eval.py` | the decisive measurement of the shipped model |
+| `gate_check.py` | EXACT mode, which is what makes win rate and survival countable |
+| `submission_check.py` | the assignment's constraints: 0.5 s per step, no multiprocessing, no absolute paths, model loadable from any working directory |
+| `benchmark_latency.py` | worst-case decision time over the hardest boards |
+
+**References.** Without these there is no way to say whether a score is good.
+
+| | |
+|---|---|
+| `run_baselines.py` | the four agents shipped with the framework, under our own protocol |
+| `reference_winrate.py` | the reference agents re-measured at the same sample size we report |
+
+**Keeping the log honest.**
+
+| | |
+|---|---|
+| `audit_report.py` | re-derives every figure quoted here from the registry and fails if one has gone stale, or if a check cannot run |
+| `verify_unchanged.py` | proves a change leaves behaviour untouched before hours are spent on it - trains twice on identical seeds under two configs and compares the tables entry by entry |
+
+The last two exist because of specific failures. An observation cache that was
+believed to be exact silently changed what the agent saw, and cost every
+experiment that ran after it; `verify_unchanged.py` is what now catches that
+class of change before it is trusted. `audit_report.py` is what catches a number
+that was correct when written and stopped being correct later.
+
+---
+
 ## Phase summary
 
 | # | change | result | verdict |
