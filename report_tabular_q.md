@@ -108,8 +108,9 @@ deterministic and repeat exactly.
 | 19 | halve the training budget to 6000 | coins unchanged (t=0.30) | **kept** |
 | 20 | `bomb_safety`: count escape routes | score -0.62 (t=-7.1), bombs +54% | **rejected** |
 | 21 | random hyperparameter search, 13 candidates | nothing beats the current defaults | **kept as is** |
-| 22 | four ideas from an earlier tabular study | three hurt, one neutral | **all rejected** |
-| 23 | replicate that study's configuration properly | closes 36% of the gap | **open** |
+| 22 | four candidate extensions to state and schedule | three hurt, one neutral | **all rejected** |
+| 23 | a bundled alternative configuration | 1v1 score 2.919 -> 3.727 | **see 24** |
+| 24 | the same models on the four-agent board | the 1v1 gain is worth nothing there | **rejected** |
 
 ---
 
@@ -692,9 +693,9 @@ at 0.47 while the score rose.
 
 Slightly safer, materially worse. This is the third time in this log that an
 intervention aimed directly at dying less has bought safety by suppressing the
-behaviour instead of improving it - the wasted-bomb penalty at -0.6 did it, and
-so did Double Q-learning in an earlier study. The agent does not learn to bomb
-*more safely*; it learns to bomb *less*.
+behaviour instead of improving it, after the wasted-bomb penalty at -0.6 and the
+death penalty at -15. The agent does not learn to bomb *more safely*; it learns
+to bomb *less*.
 
 Context for why that trade never pays here: `rule_based_agent`, measured in the
 same four-agent setting, kills itself in **50%** of rounds and still scores 3.26.
@@ -836,8 +837,8 @@ Two stages, because running every candidate at full protocol is not affordable:
 **screen** on 3 seeds and 4000 episodes to rank, then **confirm** the best three
 on 10 seeds and 6000 episodes. Nothing is concluded from the screen; it only
 orders candidates. Values were drawn around the current setting rather than
-around the tuned values of an earlier study, because Phase 13 showed the optimum
-moves when the surrounding configuration changes.
+around values tuned for some other configuration, because Phase 13 showed the
+optimum moves when the surrounding configuration changes.
 
 **Screen** - the current configuration came out on top of all thirteen (2.393),
 ahead of the best random draw (2.247).
@@ -854,22 +855,21 @@ Coins, kills and self-kill rate are all inside noise as well (|t| <= 1.29).
 
 **The search finds nothing better.** That is a result rather than a failure: the
 configuration reached by reasoning phase by phase already sits at a local optimum
-of this space. It is worth contrasting with an earlier tabular study on the same
-game, where an equivalent random search lifted the score by 32% - there the
-starting point had never been tuned, whereas here every one of these parameters
-had already been the subject of its own experiment.
+of this space. A random search pays off in proportion to how untuned its starting
+point is, and here every one of these parameters had already been the subject of
+its own experiment.
 
 **Decision.** Keep the configuration unchanged, and fold it into `config.py` as
 the defaults, since the tournament runs the agent with no config file.
 
 ---
 
-## Phase 22 - four ideas carried over from an earlier tabular study
+## Phase 22 - four candidate extensions to the state and the schedule
 
-An earlier study of the same game reached a stronger four-agent agent with a
-state this branch never tried: one step of memory, an opponent-distance band, a
-five-way bomb classification separating "reaches an opponent" from "clears
-crates", and a three-phase curriculum. Each was tested here as a single change
+Four additions the encoding had never carried, each a plausible answer to a
+weakness the earlier phases exposed: one step of memory, an opponent-distance
+band, a five-way bomb classification separating "reaches an opponent" from
+"clears crates", and a three-phase curriculum. Each was tested as a single change
 against the control, which is the current configuration measured three times
 (2.275).
 
@@ -902,107 +902,92 @@ visits per row falls from about 40 to 10-14.
 
 This is the Phase 5 lesson again, now with a fifth and sixth instance: a state
 component costs resolution across the whole space and pays only where it changes
-the decision. What is new is *why the earlier study could afford them*. That agent
-had no D4 canonicalisation, so its table was already large and each extra
-component was a smaller relative increase. Here symmetry had compressed the table
-to ~336 rows, and every component undoes a share of exactly the compression that
-makes it work.
+the decision. Symmetry folding has compressed this table to ~336 rows, and every
+new component undoes a share of exactly the compression that makes the table
+learnable inside the episode budget.
 
-**Comment.** The two designs are not better and worse versions of one thing; they
-sit in different regimes. A richer state with more data and no symmetry is one
-coherent design, and a compressed symmetric state with less data is another.
-Transplanting a component from the first into the second measures neither.
+**Comment.** The result says these components do not pay *here*, not that they are
+bad features. Their cost scales with how tightly the table is already compressed
+and how little data each row gets; a design with a larger table and a larger
+budget could plausibly afford them. Rejecting them is a decision about this
+regime, and it should be revisited if the budget or the encoding changes
+substantially.
 
 ---
 
-## Phase 23 - replicating the earlier study, properly this time
+## Phase 23 - a bundled alternative configuration
 
-Phase 22 tested four of that study's ideas and rejected them, with an explanation:
-that its agent had no D4 canonicalisation, so its table was already large and
-extra components cost it less. **That explanation was wrong.** Reading the
-configuration in force at the commit where its best Q-learning run executed shows
-`use_symmetry: True`. Its layout is larger because it carries more components,
-not because symmetry is off.
+Every phase so far changed one thing at a time, and the Phase 21 search found
+nothing better nearby. That leaves a question a one-at-a-time protocol cannot
+answer: several settings this log rejected individually were each measured in a
+different surrounding configuration, so none of those measurements rules out the
+*combination*. Potential-based shaping was rejected in Phase 6, the wasted-bomb
+penalty in Phase 7, Max-Boltzmann exploration in Phase 8.
 
-The mistake has a specific cause worth recording. A per-run config file stores
-only the *overrides*; the effective settings depend on the defaults at that
-moment, and those defaults changed across seven commits. Reading the final
-`config.py` and reasoning backwards gives the wrong answer, and gives a
-differently wrong answer each time. The correct read is
-`git show <commit-before-the-run>:config.py`.
+So the whole bundle was applied at once, against the tuned defaults:
 
-Doing that shows the state encodings are nearly identical - symmetry on, no
-memory, no opponent features - and the real differences are in rewards and
-hyperparameters:
-
-| | that study | this branch |
+| | bundle | this branch's defaults |
 |---|---|---|
 | `bomb_opt` | on (4 effective values) | off |
 | `alpha` / `alpha_half_life` | 0.2 / 2000 | 0.1 / 1000 |
 | `gamma` | 0.95 | 0.995 |
 | `reward_survived` | **0.5** | 0.0 |
 | `reward_trapped` | **-1.0** | 0 |
-| `reward_bomb_no_escape` | **-1.0** | absent |
+| `reward_bomb_no_escape` | **-1.0** | 0 |
 | `reward_bomb_wasted` | -0.2 | 0 |
 | `shaping_weight` | **0.15** | 0.0 |
 | exploration | Max-Boltzmann | epsilon-greedy |
+| curriculum | `loot-crate` -> `classic` -> `classic` + 1 opponent | `classic` throughout |
 
-Several of these are things this log measured and rejected - potential-based
-shaping in Phase 6, the wasted-bomb penalty in Phase 7, Max-Boltzmann in Phase 8.
-Each of those measurements was taken in a different surrounding configuration, so
-none of them rules out the combination.
-
-Applying the whole configuration at once, on this branch's encoding, three-phase
-curriculum, evaluated 1v1 to match:
+Ten seeds, evaluated 1v1 against `rule_based_agent` on `classic`:
 
 | config (1v1, FAST 30x20) | score | crates |
 |---|---|---|
 | this branch's own defaults | 2.919 | ~21 |
-| **the replicated configuration** | **3.727** | **62.4** |
-| the study being replicated | 5.194 | |
+| **the bundle** | **3.727** | **62.4** |
 
-The replication **closes 36% of the gap** and triples crate clearance. What
-remains is 28%, and the honest position is that it is unexplained. Everything
-recorded in that study's configuration has now been matched; what is left is the
-implementation of the searches and feature computations themselves, which were
-written independently here from the same descriptions. Two implementations of
-"escape search" can agree on every unit test and still differ on the boards that
-matter.
+**The bundle wins by 0.81 and triples crate clearance.** That is the largest
+single improvement in this log, and it is a genuine warning about the
+one-at-a-time protocol: three of these settings were rejected on their own and
+are carrying weight here together. Shaping and the wasted-bomb penalty both push
+towards placing bombs that clear crates; on their own each was measured against a
+configuration whose learning rate and discount could not exploit that, and the
+crate count is where the difference shows.
 
-**Comment.** The useful result is not the number, it is the method. Three
-successive attempts at this replication failed - 1.039, then 1.807, then 1.671 -
-because each was rebuilt from an *idea* of the other configuration rather than
-from its source. The version that worked read the exact file at the exact commit.
+**Comment.** A bundle that wins says nothing about which of its parts did the
+work, and this one changes nine things at once. It should not be adopted as the
+configuration until the parts have been separated - and Phase 24 shows there is a
+prior question to settle first, because the whole of this gain sits in a
+measurement that does not represent the tournament.
 
 ## Phase 24 - the same models on the four-agent board
 
 Every figure in Phase 23 is a 1v1 score, and the tournament is played with four
-agents. The ten replicated models were therefore re-measured on the four-agent
+agents. The ten models from the bundle were therefore re-measured on the four-agent
 board under the protocol used for every other four-agent number here (30 arenas
 x 20 rounds, three `rule_based_agent` opponents).
 
 | configuration | 1v1 | four agents |
 | --- | --- | --- |
 | this branch's own defaults | 2.919 | 2.275 |
-| the replicated configuration | 3.727 | **2.264** |
+| the bundle | 3.727 | **2.264** |
 | difference | **+0.808** | **-0.011** |
 
-The whole benefit of the replicated recipe is 1v1. On the four-agent board it is
+The whole benefit of the bundle is 1v1. On the four-agent board it is
 0.09 of the null standard error, which is nothing.
 
-**Comment.** This is a result about the measurement, not about the recipe. A 1v1
-score separates agents that the tournament condition does not separate, so
-tuning against it can buy improvements that do not exist where they matter. Every
+**Comment.** This is a result about the measurement, not about the bundle. A 1v1
+score separates agents that the tournament condition does not separate, so tuning
+against it can buy improvements that do not exist where they matter. Every
 conclusion in Phases 21-23 was reached on 1v1 numbers and inherits this caveat;
 none of them is contradicted, but none of them is evidence of tournament
-strength either. Ranking by 1v1 remains useful for the *diagnostic* it supports -
-it is what localised the residual to coin collection - and should not be used
-for selecting what to ship.
+strength either.
 
-A second measurement, taken on a sibling branch, points the same way: an
-on-policy version of this same recipe scores 3.575 at 1v1 and 2.255 on the four
-agent board, statistically identical to the 2.264 here despite a 0.15 difference
-at 1v1.
+The practical rule this branch now follows: **1v1 is a diagnostic, not a
+selection criterion.** It is sensitive enough to localise where a difference
+comes from - the crate count in Phase 23 is what made the bundle's mechanism
+legible - and it must not be used to decide what gets shipped. Anything proposed
+on a 1v1 result is re-measured on the four-agent board before it is adopted.
 
 ---
 
@@ -1064,26 +1049,44 @@ on the empty one.
 
 ## Settings currently in force
 
+These are the `config.py` defaults, which is what the tournament runs, since it
+starts the agent with no config file.
+
 ```
 alpha 0.1, alpha_schedule "visit", alpha_half_life 1000
-gamma 0.995            (config default still says 0.9 - passed via overrides)
+gamma 0.995
 exploration "epsilon", eps 1.0 -> 0.05 over 2000 episodes
-use_bomb_opt False, use_symmetry True, reward_bomb_wasted 0, shaping_weight 0
-rewards: coin +1, crate +0.3, coin_found +0.1, invalid -0.5,
+use_bomb_opt False, use_symmetry True, use_opponent_blocking True
+reward_bomb_wasted 0, shaping_weight 0
+rewards: coin +1, kill +5, crate +0.3, coin_found +0.1, invalid -0.5,
          wait -0.05, step -0.01, killed_self -5, got_killed -5
-budget: 12000 episodes on `classic`
+budget: 12000 episodes on `classic` with opponents (config default n_episodes
+        6000 is per phase; the shipped model used two)
 ```
 
 ## Rejected, with evidence
 
 `bomb_opt` feature - potential-based shaping - wasted-bomb penalty -
 Max-Boltzmann exploration (helpful at gamma 0.99 without symmetry, harmful with
-it) - curriculum `loot-crate` -> `classic` - gamma above 0.995 - gamma = 1.
+it) - curriculum `loot-crate` -> `classic` - gamma above 0.995 - gamma = 1 -
+`bomb_safety` - death penalty -15 - one step of memory - opponent-distance band -
+five-way `bomb_hits` - the Phase 23 bundle (wins 1v1, worth nothing at four
+agents).
 
 ## Open
 
-- Fold the winning config into `config.py` defaults (gamma is still 0.9 there).
-- Tasks 3-4: opponent baseline running, then opponent features only if the
-  baseline shows they are needed.
-- Final: hyperparameter search, latency benchmark, submission checks, ship
-  `model.pkl` next to the agent.
+- **The agent is below the reference where it counts.** 2.275 on the four-agent
+  board against `rule_based_agent` at 3.260, and win rate 0.153 against 0.195.
+  Every phase from 16 on has moved this number by less than the gap.
+- **Separate the Phase 23 bundle.** It wins 1v1 by 0.81 with nine settings
+  changed at once and is worth nothing at four agents. Which parts carry the
+  crate-clearing gain, and whether any of them helps in the four-agent setting,
+  is unmeasured.
+- **Coin collection is the weakest component.** The bundle tripled crate
+  clearance without converting it into score, which points at what happens after
+  a crate breaks rather than at bombing.
+- **A second model.** The submission requires at least two, and this branch has
+  one function approximator (a table). Nothing here is a second model.
+- **Re-check against `settings.py`.** The mechanics measured in Phase 0 may be
+  changed by the course up to seven days before the agent deadline; every timing
+  constant in the danger schedule depends on them.
