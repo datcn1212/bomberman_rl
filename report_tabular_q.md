@@ -109,6 +109,7 @@ deterministic and repeat exactly.
 | 20 | `bomb_safety`: count escape routes | score -0.62 (t=-7.1), bombs +54% | **rejected** |
 | 21 | random hyperparameter search, 13 candidates | nothing beats the current defaults | **kept as is** |
 | 22 | four ideas from an earlier tabular study | three hurt, one neutral | **all rejected** |
+| 23 | replicate that study's configuration properly | closes 36% of the gap | **open** |
 
 ---
 
@@ -911,6 +912,67 @@ makes it work.
 sit in different regimes. A richer state with more data and no symmetry is one
 coherent design, and a compressed symmetric state with less data is another.
 Transplanting a component from the first into the second measures neither.
+
+---
+
+## Phase 23 - replicating the earlier study, properly this time
+
+Phase 22 tested four of that study's ideas and rejected them, with an explanation:
+that its agent had no D4 canonicalisation, so its table was already large and
+extra components cost it less. **That explanation was wrong.** Reading the
+configuration in force at the commit where its best Q-learning run executed shows
+`use_symmetry: True`. Its layout is larger because it carries more components,
+not because symmetry is off.
+
+The mistake has a specific cause worth recording. A per-run config file stores
+only the *overrides*; the effective settings depend on the defaults at that
+moment, and those defaults changed across seven commits. Reading the final
+`config.py` and reasoning backwards gives the wrong answer, and gives a
+differently wrong answer each time. The correct read is
+`git show <commit-before-the-run>:config.py`.
+
+Doing that shows the state encodings are nearly identical - symmetry on, no
+memory, no opponent features - and the real differences are in rewards and
+hyperparameters:
+
+| | that study | this branch |
+|---|---|---|
+| `bomb_opt` | on (4 effective values) | off |
+| `alpha` / `alpha_half_life` | 0.2 / 2000 | 0.1 / 1000 |
+| `gamma` | 0.95 | 0.995 |
+| `reward_survived` | **0.5** | 0.0 |
+| `reward_trapped` | **-1.0** | 0 |
+| `reward_bomb_no_escape` | **-1.0** | absent |
+| `reward_bomb_wasted` | -0.2 | 0 |
+| `shaping_weight` | **0.15** | 0.0 |
+| exploration | Max-Boltzmann | epsilon-greedy |
+
+Several of these are things this log measured and rejected - potential-based
+shaping in Phase 6, the wasted-bomb penalty in Phase 7, Max-Boltzmann in Phase 8.
+Each of those measurements was taken in a different surrounding configuration, so
+none of them rules out the combination.
+
+Applying the whole configuration at once, on this branch's encoding, three-phase
+curriculum, evaluated 1v1 to match:
+
+| config (1v1, FAST 30x20) | score | crates |
+|---|---|---|
+| this branch's own defaults | 2.919 | ~21 |
+| **the replicated configuration** | **3.727** | **62.4** |
+| the study being replicated | 5.194 | |
+
+The replication **closes 36% of the gap** and triples crate clearance. What
+remains is 28%, and the honest position is that it is unexplained. Everything
+recorded in that study's configuration has now been matched; what is left is the
+implementation of the searches and feature computations themselves, which were
+written independently here from the same descriptions. Two implementations of
+"escape search" can agree on every unit test and still differ on the boards that
+matter.
+
+**Comment.** The useful result is not the number, it is the method. Three
+successive attempts at this replication failed - 1.039, then 1.807, then 1.671 -
+because each was rebuilt from an *idea* of the other configuration rather than
+from its source. The version that worked read the exact file at the exact commit.
 
 ---
 
