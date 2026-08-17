@@ -690,9 +690,9 @@ at 0.47 while the score rose.
 
 Slightly safer, materially worse. This is the third time in this log that an
 intervention aimed directly at dying less has bought safety by suppressing the
-behaviour instead of improving it - the wasted-bomb penalty at -0.6 did it, and
-so did Double Q-learning in an earlier study. The agent does not learn to bomb
-*more safely*; it learns to bomb *less*.
+behaviour instead of improving it, after the wasted-bomb penalty at -0.6 and the
+death penalty at -15. The agent does not learn to bomb *more safely*; it learns
+to bomb *less*.
 
 Context for why that trade never pays here: `rule_based_agent`, measured in the
 same four-agent setting, kills itself in **50%** of rounds and still scores 3.26.
@@ -834,8 +834,8 @@ Two stages, because running every candidate at full protocol is not affordable:
 **screen** on 3 seeds and 4000 episodes to rank, then **confirm** the best three
 on 10 seeds and 6000 episodes. Nothing is concluded from the screen; it only
 orders candidates. Values were drawn around the current setting rather than
-around the tuned values of an earlier study, because Phase 13 showed the optimum
-moves when the surrounding configuration changes.
+around values tuned for some other configuration, because Phase 13 showed the
+optimum moves when the surrounding configuration changes.
 
 **Screen** - the current configuration came out on top of all thirteen (2.393),
 ahead of the best random draw (2.247).
@@ -852,10 +852,9 @@ Coins, kills and self-kill rate are all inside noise as well (|t| <= 1.29).
 
 **The search finds nothing better.** That is a result rather than a failure: the
 configuration reached by reasoning phase by phase already sits at a local optimum
-of this space. It is worth contrasting with an earlier tabular study on the same
-game, where an equivalent random search lifted the score by 32% - there the
-starting point had never been tuned, whereas here every one of these parameters
-had already been the subject of its own experiment.
+of this space. A random search pays off in proportion to how untuned its
+starting point is, and here every one of these parameters had already been the
+subject of its own experiment.
 
 **Decision.** Keep the configuration unchanged, and fold it into `config.py` as
 the defaults, since the tournament runs the agent with no config file.
