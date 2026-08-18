@@ -57,7 +57,8 @@ SAFE_NONE, SAFE_TRAPPED, SAFE_TIGHT, SAFE_ROBUST = 0, 1, 2, 3
 # collapses it out of the encoding without changing LAYOUT, which is what makes
 # a clean ablation possible.
 FLAGS = {"use_bomb_opt": False, "use_opponent_blocking": False,
-         "use_bomb_safety": False, "use_exact_escape": False}
+         "use_bomb_safety": False, "use_exact_escape": False,
+         "coin_priority": False}
 
 
 def blast_tiles(field, x, y):
@@ -291,22 +292,20 @@ class Board:
                 return min(k + 1, 4)
         return 0
 
-    def target_search(self, coins):
-        """Shortest path to the nearest coin, or to a tile next to a crate.
+    def _goal_search(self, coin_goals, want_coins, want_crates):
+        """Breadth-first search for the nearest active goal.
 
-        One search, two goal tests: standing on a coin, or standing next to a
-        crate (a crate cannot be walked onto, so being adjacent to it is what
-        "reaching" it means). Breadth-first, so the first goal found is the
-        nearest one, and a coin wins a tie because it is tested first.
+        Goals are "standing on a coin" and "standing next to a crate" - a crate
+        cannot be walked onto, so adjacency is what reaching it means. Which of
+        the two are live is the caller's choice.
 
         Tiles that burn now or on the next step are treated as walls. Routing a
         path through them is exactly what makes an agent walk into a blast on
         its way to a coin.
         """
-        coin_goals = set(coins)
-        if self.pos in coin_goals:
+        if want_coins and self.pos in coin_goals:
             return DIR_HERE, KIND_COIN, 0
-        if self._next_to_crate(self.pos):
+        if want_crates and self._next_to_crate(self.pos):
             return DIR_HERE, KIND_CRATE, 0
 
         queue = deque()
@@ -319,15 +318,42 @@ class Board:
 
         while queue:
             tile, first_move, dist = queue.popleft()
-            if tile in coin_goals:
+            if want_coins and tile in coin_goals:
                 return first_move, KIND_COIN, min(dist, 15)
-            if self._next_to_crate(tile):
+            if want_crates and self._next_to_crate(tile):
                 return first_move, KIND_CRATE, min(dist, 15)
             for nxt in self.neighbours(*tile):
                 if nxt not in seen and not self._soon_lethal(nxt):
                     seen.add(nxt)
                     queue.append((nxt, first_move, dist + 1))
         return DIR_NONE, KIND_COIN, 0
+
+    def target_search(self, coins):
+        """Where the agent should be heading.
+
+        Two rules, selected by `coin_priority`:
+
+        * off - one search with both goals live, so whichever is *nearest* wins.
+          On `classic` a crate is almost always adjacent, so this resolves to a
+          crate nine times out of ten even when a coin is on the board.
+        * on - coins are searched first and crates only when no coin is
+          reachable at all, so a distant coin still outranks an adjacent crate.
+
+        Only the coin uncovered by a bomb pays a point; the crate itself pays
+        nothing directly. Which rule is right is a measured question, not an
+        obvious one: chasing a far coin means walking past crates that would
+        have opened more of the board.
+        """
+        coin_goals = set(coins)
+        if not FLAGS["coin_priority"]:
+            return self._goal_search(coin_goals, True, True)
+        # Skipped when no coin is on the board, so the common early-game case
+        # still costs one search rather than two.
+        if coin_goals:
+            found = self._goal_search(coin_goals, True, False)
+            if found[0] != DIR_NONE:
+                return found
+        return self._goal_search(coin_goals, False, True)
 
     def bomb_payload(self):
         """How many crates a bomb dropped here would destroy."""

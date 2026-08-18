@@ -164,3 +164,48 @@ def test_board_reports_here_when_standing_on_a_coin():
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+def test_coin_priority_changes_which_target_wins():
+    """The two target rules disagree exactly where the diagnosis said they do.
+
+    A crate sits next to the agent and a coin four steps away. The default rule
+    takes the nearest goal, so it heads for the crate; with `coin_priority` on
+    the coin wins despite being further.
+    """
+    from agent_code.tabular_q import features as F
+
+    field = open_field()
+    field[1, 2] = 1                       # crate directly below the agent
+    state = make_state(field, (1, 1), coins=[(5, 1)])
+
+    was = F.FLAGS["coin_priority"]
+    try:
+        F.FLAGS["coin_priority"] = False
+        _, kind, dist = Board(state).target_search(state["coins"])
+        assert (kind, dist) == (KIND_CRATE, 0)
+
+        F.FLAGS["coin_priority"] = True
+        direction, kind, dist = Board(state).target_search(state["coins"])
+        assert kind == KIND_COIN
+        assert dist == 4
+        assert direction != DIR_NONE
+    finally:
+        F.FLAGS["coin_priority"] = was
+
+
+def test_coin_priority_falls_back_to_crates_when_no_coin_is_reachable():
+    """With the flag on and no coin on the board, the crate rule still applies."""
+    from agent_code.tabular_q import features as F
+
+    field = open_field()
+    field[1, 2] = 1
+    state = make_state(field, (1, 1), coins=[])
+
+    was = F.FLAGS["coin_priority"]
+    try:
+        F.FLAGS["coin_priority"] = True
+        _, kind, dist = Board(state).target_search(state["coins"])
+        assert (kind, dist) == (KIND_CRATE, 0)
+    finally:
+        F.FLAGS["coin_priority"] = was

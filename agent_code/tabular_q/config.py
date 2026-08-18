@@ -77,6 +77,13 @@ class Config:
     # disagreement in 0.4% of dangerous states, so it stays off.
     use_exact_escape: bool = False
 
+    # Which target the agent walks towards when both a coin and a crate are
+    # reachable. Off: the nearest of the two. On: coins first, crates only when
+    # no coin is reachable. Phase 22 measured that with the rule off a crate is
+    # chosen in 89% of the steps where a coin is on the board, because crates
+    # are dense enough on `classic` that one is almost always adjacent.
+    coin_priority: bool = False
+
 
     # --- rewards ----------------------------------------------------------
     # The game's own score (1 per coin, 5 per kill) is far too sparse to learn

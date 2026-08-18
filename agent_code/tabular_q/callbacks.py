@@ -33,6 +33,7 @@ def setup(self):
     features.FLAGS["use_opponent_blocking"] = self.cfg.use_opponent_blocking
     features.FLAGS["use_bomb_safety"] = self.cfg.use_bomb_safety
     features.FLAGS["use_exact_escape"] = self.cfg.use_exact_escape
+    features.FLAGS["coin_priority"] = self.cfg.coin_priority
     self.use_symmetry = self.cfg.use_symmetry
 
     # Training either continues an explicit checkpoint or starts empty. Playing

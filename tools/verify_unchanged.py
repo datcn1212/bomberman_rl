@@ -18,6 +18,14 @@ trajectories, identical updates and identical exploration draws.
 
     # a sanity check that the comparison can actually fail
     python3 tools/verify_unchanged.py --b '{"gamma": 0.9}'
+
+Training runs solo. That is not a convenience: `rule_based_agent` reseeds numpy's
+global generator from OS entropy in its `setup()`, so with opponents on the board
+two runs of the *same* config visit different states and the comparison reports
+BEHAVIOUR CHANGED no matter what. Verified by running the tool with A and B set
+to the same config: solo it reports IDENTICAL, with opponents it reports DIFFERS.
+An inertness claim can only be established where the environment is
+deterministic.
 """
 
 import argparse
@@ -85,11 +93,16 @@ def main():
     p.add_argument("--b", default="{}", help="JSON overrides for the second run")
     p.add_argument("--episodes", type=int, default=300)
     p.add_argument("--seeds", type=int, nargs="+", default=[1001, 1002])
-    p.add_argument("--solo", action="store_true",
-                   help="train alone instead of against three rule_based agents")
+    p.add_argument("--with-opponents", action="store_true",
+                   help="train against three rule_based agents. The comparison "
+                        "cannot conclude anything in this mode - see the module "
+                        "docstring - so it is off by default.")
     args = p.parse_args()
 
-    opponents = [] if args.solo else ["rule_based_agent"] * 3
+    opponents = ["rule_based_agent"] * 3 if args.with_opponents else []
+    if opponents:
+        print("WARNING: with opponents on the board two runs of one config do "
+              "not repeat, so a DIFFERS verdict here means nothing.\n")
     ok_all = True
     for seed in args.seeds:
         a = train(json.loads(args.a), "a", seed, opponents, args.episodes)
