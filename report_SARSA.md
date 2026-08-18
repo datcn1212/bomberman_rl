@@ -102,5 +102,112 @@ SARSA has not become the timid agent the theory would predict; kills are slightl
 *up* (0.115 against 0.095). The whole deficit is **coins**: 1.141 against 1.803,
 a 37% drop.
 
-*(next: the same comparison on the solo board, where the runs are deterministic
-and the opponent noise is absent)*
+Whether that deficit is a property of the target or of the state it reads is not
+settled here: everything was measured under one configuration. Phase S2 changes
+the configuration and re-runs the comparison.
+
+---
+
+## Phase S2 - coin-first targeting, on both targets
+
+Phase S1 localised the deficit to coins, so the next question was about the rule
+that decides where the agent walks. `target_search` returned the nearest of
+{coin, crate}. Logging the feature tuple of every step over 30 four-agent rounds
+showed what that costs: of the 2083 steps where a coin was on the board, a
+**crate** was the target in **1855 of them (89.1%)**, because crates are dense
+enough on `classic` that one is almost always adjacent - median distance 1.
+
+`coin_priority` searches coins first and falls back to crates only when no coin
+is reachable at all, so a distant coin outranks an adjacent crate. Added as a
+config flag and proven inert while off (`tools/verify_unchanged.py`, identical
+tables on two seeds; the same tool reports DIFFERS with the flag on, so it can
+detect the change it is asked about).
+
+Both targets, 10 seeds, against the existing controls at the same protocol:
+
+| | control | coin-first | change |
+|---|---|---|---|
+| Q, score | 2.275 | **2.707** | +0.432 (3.4 SE) |
+| SARSA, score | 1.717 | **2.343** | +0.626 (4.9 SE) |
+
+Both gains are several times the noise floor. **The stated prediction still
+failed.** It was: coins up, crates roughly flat. What happened instead:
+
+| | Q control | Q coin-first |
+|---|---|---|
+| coins | 1.80 | 2.32 |
+| crates | 37.6 | **25.1** |
+| bombs | 19.7 | **12.7** |
+| self-kill | 0.489 | 0.592 |
+
+Crates fell by a third and bombs by 36%. The agent did not get better at
+collecting what it uncovered; it stopped uncovering and went to fetch what was
+already lying around. On `classic` there are nine coins and almost all start
+under crates, so collecting *more* of them while breaking *fewer* crates means
+the coins were revealed by somebody else - the three opponents.
+
+### S2.1 The gain is parasitic, and it does not survive a different field
+
+If that reading is right, the gain should disappear against an opponent that
+never bombs. `peaceful_agent` moves at random and never places a bomb, so the
+only crates that break are the ones our own agent breaks. Both controls and both
+coin-first models, same 600-round protocol:
+
+| model | vs three `rule_based_agent` | vs three `peaceful_agent` |
+|---|---|---|
+| Q control | 2.275 | **17.780** |
+| Q coin-first | 2.707 | **7.780** |
+| SARSA control | 1.717 | 6.062 |
+| SARSA coin-first | 2.343 | 4.111 |
+
+The ordering reverses completely. Coin-first wins by 0.43 where it was trained
+and loses by **10.0** where nobody else opens the board.
+
+The per-seed table shows this is not a shifted trade-off but a **fragility**:
+
+| model | per-seed score vs `peaceful_agent` |
+|---|---|
+| Q control | 16.8 17.0 17.5 17.8 17.8 18.1 18.1 18.2 18.2 18.3 |
+| Q coin-first | 0.5 0.6 3.5 3.6 9.8 10.5 12.2 12.2 12.4 12.4 |
+
+Every control seed lands in a 1.5-point band. Coin-first is bimodal, and its two
+worst seeds drop bombs to **2.3 and 3.1 per round** against the control's 38.2 -
+they survive all 400 steps and do essentially nothing, because the policy waits
+for coins that never appear.
+
+**Verdict: rejected**, in spite of a gain several times the noise floor in the
+setting it was measured in. Three reasons, in order of weight:
+
+1. It buys its gain by **suppressing bombing**, which is the fourth time in this
+   project that an intervention hit its target that way rather than by improving
+   the behaviour.
+2. The gain is **contingent on the opponents doing the crate work**. A tournament
+   field is unknown, so this is a bet on the field rather than a skill.
+3. It makes training **unreliable**: 4 of 10 seeds learned the dependence so
+   strongly that they nearly stopped bombing altogether.
+
+`coin_priority` stays in the code, defaulted off and proven inert, because the
+measurement is worth keeping reproducible.
+
+### S2.2 What this says about the target
+
+The Q-SARSA gap narrows under the new rule - from 0.558 (4.4 SE) to 0.364
+(2.8 SE) - and SARSA gained more from the change than Q did (+0.626 against
++0.432). The sign does not change: Q is still ahead in both configurations.
+
+So Phase S1's conclusion survives, with its scope now measured rather than
+assumed: **SARSA is worse here, and how much worse depends on the state
+representation.** It is not a constant of the two targets.
+
+---
+
+## Open
+
+- The agent is still below the reference where it counts: 2.275 on the
+  four-agent board against `rule_based_agent` at 3.260.
+- Both interventions that raised the four-agent score so far did it by bombing
+  less. Nothing yet has made the agent bomb *better*.
+- The 89% figure bounds the target-rule divergence from above ("a coin is on the
+  board" is not "a coin is reachable"); the exact rate is unmeasured.
+- No second model. SARSA and Q share one function approximator, one state
+  encoding and one feature set, so they may not count as two.
