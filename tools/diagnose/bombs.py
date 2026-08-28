@@ -7,7 +7,7 @@ trained model and records, for every bomb it chooses to drop, how many crates
 the blast would cover and whether an escape route existed at that moment.
 
 Run from the repository root:
-    python3 tools/analyse_bombs.py experiments/p3_danger --seeds 1 2 3 4 5
+    python3 tools/diagnose.py bombs experiments/p3_danger --seeds 1 2 3 4 5
 """
 
 import argparse

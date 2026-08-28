@@ -6,7 +6,7 @@ wide to say whether 0.460 beats 0.433. Our own figures are five seeds of 30
 rounds, so this repeats the 30-seed EXACT protocol five times as well, on
 disjoint seed blocks, for a like-for-like comparison.
 
-    python3 tools/reference_winrate.py
+    python3 tools/reference.py winrate
 """
 
 import statistics as st

@@ -1,6 +1,6 @@
 """Measure the four agents shipped with the framework under our own evaluation
 protocol, so every later result has a permanent reference point measured the
-same way. Run from the repository root: python3 tools/run_baselines.py
+same way. Run from the repository root: python3 tools/reference.py baselines
 """
 
 import sys

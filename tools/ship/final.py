@@ -5,7 +5,7 @@ than inferred, and 600 rounds per setting because this log does not make a
 head-to-head claim on less. Arenas 9001 onwards; the model was chosen on a
 disjoint block, so none of these rounds took part in selecting it.
 
-    python3 tools/final_eval.py
+    python3 tools/ship.py final
 """
 
 import argparse

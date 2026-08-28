@@ -2,7 +2,7 @@
 
 Subcommands:
 
-    select     pick which seed to ship, on held-out arenas
+    choose     pick which seed to ship, on held-out arenas
     final      the decisive measurement of the shipped model
     gate       EXACT mode, the only way to count win rate
     check      the assignment's hard constraints
@@ -18,7 +18,7 @@ import runpy
 import sys
 from pathlib import Path
 
-SUBCOMMANDS = ['select', 'final', 'gate', 'check', 'latency']
+SUBCOMMANDS = ["choose", "final", "gate", "check", "latency"]
 
 
 def main():

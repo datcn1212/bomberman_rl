@@ -11,7 +11,7 @@ the factor by which canonicalising the encoding would shrink the table and
 multiply the experience per row.
 
 Run from the repository root:
-    python3 tools/analyse_symmetry.py experiments/p10_g99 --seeds 1 2 3 4 5
+    python3 tools/diagnose.py symmetry experiments/p10_g99 --seeds 1 2 3 4 5
 """
 
 import argparse

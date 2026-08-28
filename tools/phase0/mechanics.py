@@ -12,7 +12,7 @@ raw observations, then answers:
   (e) how walls block a blast,
   (f) whether walking back into a decaying blast is still lethal.
 
-Run from the repository root:  python3 tools/verify_mechanics.py
+Run from the repository root:  python3 tools/phase0/mechanics.py
 """
 
 import json

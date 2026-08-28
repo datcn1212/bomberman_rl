@@ -5,7 +5,7 @@ a failure instead of guessing at it: for every state the greedy action, the
 margin over the runner-up, and how often the state was updated during training.
 
 Run from the repository root:
-    python3 tools/inspect_policy.py experiments/p1_nobomb/seed3/model.pkl
+    python3 tools/diagnose.py policy experiments/p1_nobomb/seed3/model.pkl
 """
 
 import argparse

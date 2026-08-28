@@ -7,7 +7,7 @@ selecting noise. So selection uses a fresh block of evaluation seeds, and the
 number finally reported comes from the original block, which played no part in
 the choice.
 
-    python3 tools/select_final.py --exp-id final_tabular_q
+    python3 tools/ship.py choose --exp-id final_tabular_q
 """
 
 import argparse

@@ -3,7 +3,7 @@
 Everything here is a rule the tournament enforces or a failure mode that has
 already cost this project time. Run from the repository root:
 
-    python3 tools/submission_check.py
+    python3 tools/ship.py check
 """
 
 import ast
@@ -66,7 +66,7 @@ def check_think_time():
     stats = json.loads((ROOT / "results" / "submission_check_rb.json").read_text())
     me = stats["by_agent"]["tabular_q"]
     mean_ms = 1000.0 * me["time"] / max(1, me["steps"])
-    proc = subprocess.run([sys.executable, "tools/benchmark_latency.py",
+    proc = subprocess.run([sys.executable, "tools/ship/latency.py",
                            str(AGENT_DIR / "model.pkl")],
                           cwd=ROOT, capture_output=True, text=True)
     worst = re.search(r"full decision step\s+mean\s+([\d.]+) ms\s+p99\s+([\d.]+) ms\s+max\s+([\d.]+) ms",

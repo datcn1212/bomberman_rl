@@ -8,7 +8,7 @@ written:
       over once or twice (game_events_occurred *and* end_of_round)?
   (b) when the agent dies, which callback carries the fatal events?
 
-Run from the repository root:  python3 tools/verify_events.py
+Run from the repository root:  python3 tools/phase0/events.py
 """
 
 import json

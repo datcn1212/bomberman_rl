@@ -5,8 +5,8 @@ stats file aggregates them. EXACT mode plays one round per process, so each file
 describes a single round: that is what makes an honest win rate possible, and
 survival too, by comparing the agent's own step count against the round length.
 
-    python3 tools/gate_check.py --exp s2g_slowdecay --scenario classic
-    python3 tools/gate_check.py --exp s5_final --scenario classic \\
+    python3 tools/ship.py gate --exp s2g_slowdecay --scenario classic
+    python3 tools/ship.py gate --exp s5_final --scenario classic \\
         --opponents rule_based_agent
 """
 

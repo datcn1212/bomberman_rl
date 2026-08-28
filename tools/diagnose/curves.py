@@ -4,7 +4,7 @@ Overlays several experiments on the same axes so a change can be read as a
 change, not as two pictures that have to be compared from memory. Seeds of the
 same experiment are averaged and their spread shaded.
 
-    python3 tools/plot_curves.py --out figures/s2.png \\
+    python3 tools/diagnose.py curves --out figures/s2.png \\
         --exp s2_curriculum s2_direct --metric coins
 """
 

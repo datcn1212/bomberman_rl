@@ -6,7 +6,7 @@ skipped entirely until the debt is paid. So the number that matters is the
 maximum, not the mean, measured on the most expensive board state we can build:
 full crate density, several bombs ticking, opponents present.
 
-Run from the repository root:  python3 tools/benchmark_latency.py [model.pkl]
+Run from the repository root:  python3 tools/ship.py latency [model.pkl]
 """
 
 import statistics
