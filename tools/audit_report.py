@@ -49,6 +49,8 @@ CLAIMS = [
     ("Phase 23 the bundle, crates",     "p23_replicate",   1, "mean_crates", 62.4),
     ("Phase 24 the bundle, 4-agent",    "p23_four",        3, "mean_score", 2.264),
     ("final model, ranking block",      "final_tabular_q", 3, "mean_score", 2.221),
+    ("Phase 26 anchor, seeded",         "p26_anchor",      3, "mean_score", 2.210),
+    ("Phase 26 anchor, stock",          "p26_anchor_stock", 3, "mean_score", 2.216),
 ]
 
 # The three runs of one identical configuration that size the noise floor.
@@ -74,7 +76,10 @@ def per_seed(rows, exp_id, opponents, key):
     for row in rows:
         if not re.fullmatch(re.escape(exp_id) + r"_seed\d+", row["exp_id"]):
             continue
-        if row["opponents"].count("rule_based_agent") != opponents:
+        # Counts both `rule_based_agent` and `rule_based_seeded`: from Phase 26
+        # the opponent is the seeded variant, and the two were measured to be
+        # interchangeable (paired t = -0.13), so they index the same setting.
+        if row["opponents"].count("rule_based") != opponents:
             continue
         if row[key] in ("", "nan"):
             continue

@@ -135,6 +135,7 @@ it, and figures that were correct when written stopped being correct later.
 | 23 | a bundled alternative configuration | 1v1 score 2.919 -> 3.727 | **see 24** |
 | 24 | the same models on the four-agent board | the 1v1 gain is worth nothing there | **rejected** |
 | 25 | seed the opponent; strip rejected code | measurements repeat exactly | **kept** |
+| 26 | re-anchor on the current encoding | 2.210, and the seeded opponent is unbiased | **kept** |
 
 ---
 
@@ -1111,6 +1112,67 @@ that names neither file.
 
 ---
 
+## Phase 26 - a clean anchor on the current encoding
+
+Phase 25 left two things unsettled. The shipped model no longer loaded, because
+the encoding had moved from six slots to eight in Phase 22 and it was never
+retrained. And every number from Phase 16 on had been measured against the
+unseeded opponent, so there was no anchor on the new protocol.
+
+One run settles both: the configuration in `config.py` - no overrides, which is
+what the tournament runs - trained for 6000 episodes on `classic` against three
+seeded opponents, ten seeds. The same ten models were then measured twice.
+
+### 26.1 The seeded opponent does not move the answer
+
+| | score | coins | crates | self-kill |
+|---|---|---|---|---|
+| vs `rule_based_seeded` | 2.210 | 1.679 | 35.4 | 0.527 |
+| vs `rule_based_agent` | 2.216 | 1.650 | 35.5 | 0.537 |
+
+Paired over the ten models: mean difference **-0.006**, sd 0.141,
+**t = -0.13**. No detectable bias on any measure.
+
+This is the result that matters for the rest of the log: it means the seeded
+opponent is a lower-noise substitute rather than a different opponent, so the
+numbers from Phases 16-24 stay on the same scale as anything measured from here
+on. Had it come out otherwise, twenty-four phases would have needed re-measuring.
+
+### 26.2 The cleanup did not cost anything
+
+| | score |
+|---|---|
+| old anchor, three pooled runs, six-slot layout | 2.275 |
+| new anchor, eight-slot layout, code stripped | **2.210** |
+
+A difference of -0.065, which is 0.72 of the old noise floor. Consistent with the
+entry-by-entry table comparison in Phase 25.2: removing 236 lines and moving the
+encoding changed nothing measurable.
+
+### 26.3 The shipped model
+
+`ship choose` ranked the ten seeds on arenas 9101-9130 and picked seed 6, which
+scores **2.768** on 9001-9030 - the block that played no part in the choice, and
+therefore the number to report. 358 rows, 59 KB. Submission checks **10/10**,
+worst-case decision 0.16 ms against the 0.5 s budget.
+
+### 26.4 Two more shadowed module names
+
+Grouping the tools introduced a second collision of the kind Phase 25.3 records,
+and it was worse than the first because it lied rather than crashed:
+`tools/ship/select.py` shadowed the built-in `select`, which `concurrent.futures`
+imports, so the latency tool failed and the submission check reported the agent's
+worst-case think time as **infinite**. It read as a failed agent rather than a
+broken tool. A third name, `tools/phase0/events.py`, shadowed the framework's own
+`events` module.
+
+`tools/check_shadowing.py` now fails if any module under `tools/` shadows
+something importable. It asks `importlib.util.find_spec` from outside the
+repository, because the obvious test - globbing the standard library for `*.py` -
+misses exactly the case that caused the damage: `select` is a C extension.
+
+---
+
 ## Final result
 
 The shipped model is `experiments/final_tabular_q/seed10/model.pkl`, chosen on
@@ -1208,15 +1270,9 @@ Each was measured, not argued about. Phase in brackets.
 2. **Nothing has made the agent bomb better.** Both interventions that raised the
    four-agent score did it by bombing less. That is the substantive problem, and
    it is where the remaining 1.0 point sits.
-3. **The shipped `model.pkl` does not load** under the current eight-slot layout
-   (Phase 25.4). The chosen configuration has to be retrained on the current
-   encoding before anything can be submitted.
-4. **Re-measure the baseline against the seeded opponent.** Phases 16-24 were
-   measured against the unseeded one. Expectation is unchanged, but a clean
-   anchor is needed before comparing new work to old numbers.
-5. **A second model.** The submission needs at least two and this branch has one
+3. **A second model.** The submission needs at least two and this branch has one
    function approximator. Q against SARSA shares the table, the encoding and the
    features, so it may not count as two.
-6. **Re-check against `settings.py`.** The course may change the mechanics up to
+4. **Re-check against `settings.py`.** The course may change the mechanics up to
    seven days before the agent deadline, and every timing constant in the danger
    schedule depends on them.
