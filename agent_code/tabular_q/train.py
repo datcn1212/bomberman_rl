@@ -21,7 +21,7 @@ import numpy as np
 import events as e
 
 from . import features
-from .features import ACTIONS, DIR_NONE, DIRS, Board
+from .features import ACTIONS, DIR_NONE, Board
 from .model import observe_and_encode, to_frame
 
 
@@ -67,16 +67,6 @@ def _potential(self, obs):
     if obs.target_dir != DIR_NONE:
         dist = min(obs.target_dist, self.cfg.shaping_distance_cap)
     return -self.cfg.shaping_weight * dist
-
-
-def _next_arrival(old_game_state, new_game_state):
-    """Direction from the old position to the new one, for the successor state."""
-    ox, oy = old_game_state["self"][3]
-    nx, ny = new_game_state["self"][3]
-    for index, (dx, dy) in enumerate(DIRS):
-        if (nx - ox, ny - oy) == (dx, dy):
-            return index + 1
-    return 0
 
 
 def _wasted_bomb(old_game_state, events):
@@ -170,9 +160,9 @@ def game_events_occurred(self, old_game_state, self_action, new_game_state, even
         return
     _flush(self)
     old_index, old_obs, old_perm = observe_and_encode(
-        old_game_state, self.cfg.use_symmetry, self.last_move)
+        old_game_state, self.cfg.use_symmetry)
     new_index, new_obs, _ = observe_and_encode(
-        new_game_state, self.cfg.use_symmetry, _next_arrival(old_game_state, new_game_state))
+        new_game_state, self.cfg.use_symmetry)
     shaping = (self.cfg.gamma * _potential(self, new_obs)) - _potential(self, old_obs)
     self.pending = Transition(
         step=old_game_state["step"],
@@ -198,7 +188,7 @@ def end_of_round(self, last_game_state, last_action, events):
         # Terminal transition: Ng et al. require Phi(terminal) = 0 for the
         # policy-invariance guarantee, so the shaping term is just -Phi(s).
         last_index, last_obs, last_perm = observe_and_encode(
-            last_game_state, self.cfg.use_symmetry, self.last_move)
+            last_game_state, self.cfg.use_symmetry)
         self.pending = Transition(
             step=last_game_state["step"],
             state=last_index,

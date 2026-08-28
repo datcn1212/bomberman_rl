@@ -29,17 +29,9 @@ def setup(self):
 
     # The observation must match the one the model was trained with, so at play
     # time the model's own record wins over whatever the config happens to say.
-    features.FLAGS["use_bomb_opt"] = self.cfg.use_bomb_opt
     features.FLAGS["use_opponent_blocking"] = self.cfg.use_opponent_blocking
-    features.FLAGS["use_bomb_safety"] = self.cfg.use_bomb_safety
-    features.FLAGS["use_exact_escape"] = self.cfg.use_exact_escape
-    features.FLAGS["use_bomb_hits"] = self.cfg.use_bomb_hits
-    features.FLAGS["use_opponent_distance"] = self.cfg.use_opponent_distance
-    features.FLAGS["use_last_move"] = self.cfg.use_last_move
     # The direction the agent moved on the previous step, in absolute terms.
     # Reset per round by start_round via the framework's fresh game_state.
-    self.last_move = 0
-    self.last_pos = None
     self.use_symmetry = self.cfg.use_symmetry
 
     # Training either continues an explicit checkpoint or starts empty. Playing
@@ -66,9 +58,7 @@ def act(self, game_state):
     # `perm` is the frame the row is written in: with symmetry on, the chosen
     # action has to be translated back out of the canonical frame before it is
     # returned to the game.
-    self.last_move = _arrival_direction(self, game_state)
-    state, _, perm = observe_and_encode(game_state, self.cfg.use_symmetry,
-                                        self.last_move)
+    state, _, perm = observe_and_encode(game_state, self.cfg.use_symmetry)
     values = self.model.values(state)[self.legal]
 
     if self.train and self.rng.random() < self.epsilon:
@@ -117,26 +107,6 @@ def explore(self, values):
             return int(self.rng.integers(len(values)))
         return int(self.rng.choice(len(values), p=weights / total))
     raise ValueError("unknown exploration %r" % self.cfg.exploration)
-
-
-def _arrival_direction(self, game_state):
-    """Which way the agent stepped to get here, as a direction index plus one.
-
-    Zero when it did not move, or on the first step of a round. Position is used
-    rather than the action taken, because an action that turned out to be invalid
-    did not move the agent and must not be remembered as if it had.
-    """
-    pos = game_state["self"][3]
-    step = game_state["step"]
-    if self.last_pos is None or step == 1:
-        self.last_pos = pos
-        return 0
-    dx, dy = pos[0] - self.last_pos[0], pos[1] - self.last_pos[1]
-    self.last_pos = pos
-    for index, (ex, ey) in enumerate(DIRS):
-        if (dx, dy) == (ex, ey):
-            return index + 1
-    return 0
 
 
 def greedy(rng, values):

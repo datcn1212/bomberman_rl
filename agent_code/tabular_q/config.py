@@ -42,12 +42,6 @@ class Config:
     # instead of assuming it.
     allow_bomb: bool = True
 
-    # Off by default. Phase 5 measured that this component carries no
-    # information in the states where the bombing decision is made, while
-    # fragmenting the travelling states by 25% -- which costs the movement
-    # policy far more than the bombing policy gains.
-    use_bomb_opt: bool = False
-
     # Fold each state onto the smallest member of its D4 orbit (four rotations
     # x two reflections). Every feature is relative to the agent, so rotating
     # the board is the same situation described in a different frame; without
@@ -60,28 +54,6 @@ class Config:
     # other agents' bodies, the move turns out invalid, and the agent stands
     # still inside a blast.
     use_opponent_blocking: bool = True
-
-    # Reuse the dormant bomb_opt slot to report how many escape routes a bomb
-    # dropped here would leave: none / trapped / exactly one / two or more.
-    # A binary "is there a way out" cannot separate a bomb an opponent can seal
-    # off from one it cannot, which is what makes bombing risky in a crowd.
-    use_bomb_safety: bool = False
-
-    # Five-way bomb classification that separates "reaches an opponent" from
-    # "clears crates". The four-way version had no such category.
-    use_bomb_hits: bool = False
-
-    # Whether the nearest opponent is absent, far, or within five walking steps.
-    use_opponent_distance: bool = False
-
-    # One step of memory: the direction the agent arrived from. Without it a
-    # greedy policy can oscillate between two tiles, since both look identical.
-    use_last_move: bool = False
-
-    # Settle the escape question by backward induction over (tile, step) instead
-    # of a frontier search. More complete, but measured at 1.6x the cost for a
-    # disagreement in 0.4% of dangerous states, so it stays off.
-    use_exact_escape: bool = False
 
 
     # --- rewards ----------------------------------------------------------

@@ -214,7 +214,7 @@ class QModel:
         return model
 
 
-def observe_and_encode(game_state, use_symmetry, last_move=0):
+def observe_and_encode(game_state, use_symmetry):
     """The observation, its table index, and the frame that index is written in.
 
     With symmetry off the frame is the identity and the index is the plain
@@ -226,7 +226,7 @@ def observe_and_encode(game_state, use_symmetry, last_move=0):
     position is unchanged - exactly the case that matters, standing still inside
     a blast.
     """
-    obs = observe(game_state, last_move)
+    obs = observe(game_state)
     if use_symmetry:
         index, perm = canonical(obs)
         return index, obs, perm

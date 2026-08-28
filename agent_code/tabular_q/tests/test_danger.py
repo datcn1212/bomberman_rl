@@ -16,19 +16,8 @@ sys.path.insert(0, str(ROOT))
 
 import settings as s  # noqa: E402
 from agent_code.tabular_q.features import (  # noqa: E402
-    BLOCKED, BOMB_NONE, BOMB_POINTLESS, BOMB_TRAPPED, BOMB_USEFUL, DIR_HERE,
-    DIR_NONE, FLAGS, FREE_LETHAL, FREE_SAFE, HIT_CRATE, HIT_NONE,
-    HIT_OPPONENT, HIT_POINTLESS, HORIZON, OPP_FAR, OPP_NEAR, OPP_NONE,
-    SAFE_NONE, SAFE_ROBUST, SAFE_TIGHT, SAFE_TRAPPED, Board, blast_tiles,
-    danger_schedule, observe)
-
-
-@pytest.fixture
-def bomb_opt_on():
-    """bomb_opt is off by default (Phase 5); these tests exercise the computation."""
-    FLAGS["use_bomb_opt"] = True
-    yield
-    FLAGS["use_bomb_opt"] = False
+    BLOCKED, BOMB_NONE, DIR_HERE, DIR_NONE, FLAGS, FREE_LETHAL, FREE_SAFE,
+    HORIZON, OPP_NONE, Board, blast_tiles, danger_schedule, observe)
 
 
 def open_field(w=9, h=9):
@@ -165,49 +154,6 @@ def test_t_here_counts_down_to_the_blast():
     assert observe(make_state(field, (4, 4))).t_here == 0
 
 
-def test_bomb_option_none_without_a_bomb(bomb_opt_on):
-    field = open_field()
-    field[5, 4] = 1
-    state = make_state(field, (4, 4))
-    state["self"] = ("me", 0, False, (4, 4))     # bombs_left = False
-    assert observe(state).bomb_opt == BOMB_NONE
-
-
-def test_bomb_option_pointless_when_nothing_is_in_range(bomb_opt_on):
-    """The gap Phase 3 exposed: adjacent to a crate diagonally is not in range."""
-    field = open_field()
-    field[5, 5] = 1                              # crate on the diagonal
-    obs = observe(make_state(field, (4, 4)))
-    assert obs.bomb_opt == BOMB_POINTLESS
-
-
-def test_bomb_option_useful_when_a_crate_is_in_range_and_escape_exists(bomb_opt_on):
-    field = open_field()
-    field[5, 4] = 1
-    obs = observe(make_state(field, (4, 4)))
-    assert obs.bomb_opt == BOMB_USEFUL
-
-
-def test_bomb_option_trapped_in_a_dead_end(bomb_opt_on):
-    """Bombing at the end of a short dead end leaves nowhere to run."""
-    field = open_field(11, 11)
-    field[:, 1] = -1
-    field[:, 3] = -1
-    field[4:, 2] = -1                            # corridor is x = 1..3 only
-    field[3, 2] = 1                              # crate sealing the end
-    obs = observe(make_state(field, (2, 2)))
-    assert obs.bomb_opt == BOMB_TRAPPED
-
-
-def test_bomb_option_counts_crates_through_other_crates():
-    """A blast destroys every crate on its ray, not just the first."""
-    field = open_field(11, 11)
-    field[5, 4] = 1
-    field[6, 4] = 1
-    board = Board(make_state(field, (4, 4)))
-    assert board.bomb_payload() == 2
-
-
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
 
@@ -269,109 +215,3 @@ def test_opponents_do_not_block_beyond_the_first_step(opponent_blocking_on):
     assert board.walkable((7, 4), now=True) is False
     assert board.walkable((7, 4)) is True
 
-
-@pytest.fixture
-def bomb_safety_on():
-    FLAGS["use_bomb_safety"] = True
-    yield
-    FLAGS["use_bomb_safety"] = False
-
-
-def test_bomb_safety_reports_no_bomb(bomb_safety_on):
-    field = open_field()
-    state = make_state(field, (4, 4))
-    state["self"] = ("me", 0, False, (4, 4))
-    assert observe(state).bomb_opt == SAFE_NONE
-
-
-def test_bomb_safety_open_board_is_robust(bomb_safety_on):
-    """In the open there are several ways out, so bombing is low risk."""
-    obs = observe(make_state(open_field(11, 11), (5, 5)))
-    assert obs.bomb_opt == SAFE_ROBUST
-
-
-def test_bomb_safety_dead_end_is_trapped(bomb_safety_on):
-    field = open_field(11, 11)
-    field[:, 1] = -1
-    field[:, 3] = -1
-    field[4:, 2] = -1                       # corridor x = 1..3 only
-    assert observe(make_state(field, (2, 2))).bomb_opt == SAFE_TRAPPED
-
-
-def test_bomb_safety_single_corridor_is_tight(bomb_safety_on):
-    """One way out is survivable but an opponent can seal it."""
-    field = open_field(13, 13)
-    field[:, 1] = -1
-    field[:, 3] = -1                        # long corridor at y = 2
-    obs = observe(make_state(field, (2, 2)))
-    assert obs.bomb_opt == SAFE_TIGHT
-
-
-def test_bomb_safety_counts_routes_not_just_existence(bomb_safety_on):
-    field = open_field(13, 13)
-    field[:, 1] = -1
-    field[:, 3] = -1
-    tight = Board(make_state(field, (2, 2)), extra_bomb=(2, 2)).escape_routes()
-    field[2, 3] = 0                         # open a second way out
-    field[2, 4] = 0
-    roomier = Board(make_state(field, (2, 2)), extra_bomb=(2, 2)).escape_routes()
-    assert roomier > tight
-
-
-@pytest.fixture
-def opponent_distance_on():
-    FLAGS["use_opponent_distance"] = True
-    FLAGS["use_opponent_blocking"] = True
-    yield
-    FLAGS["use_opponent_distance"] = False
-    FLAGS["use_opponent_blocking"] = False
-
-
-@pytest.fixture
-def bomb_hits_on():
-    FLAGS["use_bomb_hits"] = True
-    yield
-    FLAGS["use_bomb_hits"] = False
-
-
-def test_opponent_state_none_when_alone(opponent_distance_on):
-    assert observe(make_state(open_field(13, 13), (6, 6))).opponent == OPP_NONE
-
-
-def test_opponent_state_near_and_far(opponent_distance_on):
-    field = open_field(15, 15)
-    near = observe(make_state(field, (6, 6), others=[other((6, 9))]))
-    far = observe(make_state(field, (2, 2), others=[other((12, 12))]))
-    assert near.opponent == OPP_NEAR      # three steps
-    assert far.opponent == OPP_FAR        # twenty steps
-
-
-def test_opponent_distance_is_walking_distance_not_straight_line(opponent_distance_on):
-    """An opponent just across a wall is not two steps away."""
-    field = open_field(15, 15)
-    field[:, 7] = -1                       # full wall between the two halves
-    obs = observe(make_state(field, (6, 6), others=[other((6, 8))]))
-    assert obs.opponent == OPP_FAR
-
-
-def test_bomb_hits_separates_opponent_from_crate(bomb_hits_on):
-    field = open_field(13, 13)
-    field[7, 6] = 1
-    assert observe(make_state(field, (6, 6))).bomb_opt == HIT_CRATE
-
-    plain = open_field(13, 13)
-    assert observe(make_state(plain, (6, 6),
-                              others=[other((8, 6))])).bomb_opt == HIT_OPPONENT
-
-
-def test_bomb_hits_pointless_when_it_reaches_neither(bomb_hits_on):
-    field = open_field(13, 13)
-    assert observe(make_state(field, (6, 6))).bomb_opt == HIT_POINTLESS
-
-
-def test_bomb_hits_reports_no_bomb(bomb_hits_on):
-    field = open_field(13, 13)
-    field[7, 6] = 1
-    state = make_state(field, (6, 6))
-    state["self"] = ("me", 0, False, (6, 6))
-    assert observe(state).bomb_opt == HIT_NONE
