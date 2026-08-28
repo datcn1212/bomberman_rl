@@ -1,42 +1,51 @@
 # Tabular Q-learning - experiment log
 
-Working log for the tabular agent in `agent_code/tabular_q/`. One entry per
-phase: what changed, what it measured, what we decided. Negative results are
-kept - a change that did nothing is still evidence.
+Working log for the agent in `agent_code/tabular_q/`. One entry per phase: what
+changed, what it measured, what was decided. Negative results are kept, because
+a change that did nothing is still evidence.
 
-Every run is reproducible from the JSON config stored next to its model in
-`experiments/<exp_id>/seed<k>/`.
+**Where this stands.** Twenty-five phases. The agent plays Task 2 well (8.88
+coins solo) and is still **below the reference on the four-agent board**: 2.275
+against `rule_based_agent` at 3.260. Every intervention that raised the
+four-agent score so far did it by bombing *less*; nothing yet has made the agent
+bomb *better*. That is the open problem.
+
+**How to read it.** The phase table below is the index. Each phase states the one
+thing it changed and the number that decided it. Every quoted figure is
+re-derived from `experiments/registry.csv` by `tools/audit_report.py`, which
+fails if a number here has gone stale or if a check cannot run.
 
 ---
 
 ## Setup
 
 **Actions** - the framework's six, in its order: `UP RIGHT DOWN LEFT WAIT BOMB`.
-Direction index `i` equals move-action index `i` everywhere in the code.
+Direction index `i` equals move-action index `i` throughout the agent.
 
-**State** - a tuple of small integers, packed into one table row by mixed-radix
-encoding. This is the part that evolves; it starts minimal and only grows when a
-measurement shows something is missing. `model.LAYOUT` records the radix of each
-component and is checked on load, because changing the encoding while old models
-exist fails *silently*: every lookup misses, the agent still runs, scores just
-get worse.
-
-Current encoding (`bomb_opt` held constant since Phase 5):
+**State** - a tuple of small integers packed into one table row by mixed-radix
+encoding. `model.LAYOUT` records each component's radix and is checked on load,
+because changing the encoding while old models exist fails *silently*: every
+lookup misses, the agent still runs, the score just drops.
 
 | component | radix | meaning |
 |---|---|---|
 | `move_status` | 81 | each neighbour: blocked / free-safe / free-lethal |
-| `t_here` | 5 | steps until this tile burns; 0 = it doesn't |
-| `target_dir` | 6 | direction to nearest coin or crate, or "already there" |
-| `target_kind` | 3 | is that target a crate, a coin, or an opponent |
+| `t_here` | 5 | steps until this tile burns; 0 = it does not |
+| `target_dir` | 6 | direction to the nearest coin or crate, or "already there" |
+| `target_kind` | 3 | is that target a crate or a coin |
 | `escape_dir` | 6 | first move of a surviving path / none / stay put |
 
-About 630-750 rows are ever visited, so the table is a **sparse dict**, not an
-array (a dense array was 98.6% zeros).
+Three further slots (`bomb_opt`, `opponent`, `last_move`) are reserved by LAYOUT
+and held constant - each was measured and rejected in Phases 5, 20 and 22. They
+stay in the layout so that every model ever saved still loads; their producing
+code was removed in Phase 25 and lives in git history.
+
+About 630-750 rows are ever visited, so the table is a **sparse dict** rather
+than an array, which would be 98.6% zeros.
 
 **Rewards** - the game score (1/coin, 5/kill) is far too sparse to learn from, so
-reward is built from the per-step event list. All weights live in `config.py`, so
-a reward change is a config diff, not a code edit.
+reward is assembled from the per-step event list. Every weight lives in
+`config.py`, which makes a reward change a config diff rather than a code edit.
 
 **Update** - one-step TD control, off-policy:
 
@@ -44,32 +53,26 @@ a reward change is a config diff, not a code edit.
 Q(s,a) <- Q(s,a) + alpha * [ r + gamma * max_a' Q(s',a') - Q(s,a) ]
 ```
 
-Terminal transitions use target `r` alone. `max` runs over *legal* actions only.
-Step size `alpha / (1 + n(s,a)/half_life)`, counted per (state, action) pair.
+Terminal transitions use target `r` alone, and `max` runs over *legal* actions
+only. Step size `alpha / (1 + n(s,a)/half_life)`, counted per (state, action).
 
 **Protocol** - training seeds `1000+k`; evaluation seeds `9001..9030`, disjoint.
-FAST mode = 30 seeds x 20 rounds. Configs are compared **paired on the same
-seeds**. Most comparisons use 10 seeds, because between-seed variance is as large
-as the effects being measured.
+FAST mode = 30 arenas x 20 rounds. Configurations are compared **paired on the
+same seeds**, over 10 seeds, because between-seed variance is as large as the
+effects being measured.
 
-**Noise floor with opponents.** `rule_based_agent` re-seeds itself from system
-entropy, so two runs of an *identical* configuration do not repeat: the opponents
-behave differently over the training episodes and the agent learns a different
-table. Pairing on the training seed does not remove this, because the pairing does
-not extend to the opponents.
+**Noise floor.** Phases 16-24 were measured against the stock
+`rule_based_agent`, which draws its tie-breaks from an unseeded `random` module,
+so two runs of an *identical* configuration do not repeat. Running one
+configuration three times (`p19b`, `final_tabular_q`, `repeat_c`) gave 2.379,
+2.221 and 2.224: a **run-to-run standard deviation of 0.090**.
 
-One configuration was therefore run three times (`p19b`, `final_tabular_q`,
-`repeat_c`), giving scores of 2.379, 2.221 and 2.224 - a **run-to-run standard
-deviation of 0.090** on the mean.
+The paired t statistic is invalid against that - the same difference of -0.16
+gives t = -3.45 in one pairing and t = -0.70 in another - so four-agent effects
+in those phases are judged by effect size against the spread, with a null
+standard error of `0.090 * sqrt(2) = 0.127`.
 
-The paired t statistic is unreliable against this: the same difference of -0.16
-gives t = -3.45 in one pairing and t = -0.70 in another, because paired standard
-errors assume the pairing removes the noise and here it does not. So four-agent
-comparisons are judged by **effect size against the run-to-run spread**: a
-difference `d` between two single runs has a null standard error of about
-`0.090 * sqrt(2) = 0.127`.
-
-| comparison | difference in score | z against the noise floor |
+| comparison | difference | z |
 |---|---|---|
 | Phase 16, opponents block moves | +0.424 | 3.3 |
 | Phase 17a, all training with opponents | +0.435 | 3.4 |
@@ -77,72 +80,28 @@ difference `d` between two single runs has a null standard error of about
 | Phase 20, `bomb_safety` | -0.617 | -4.9 |
 | Phase 21, best search candidate | +0.044 | 0.3 |
 
-Solo comparisons are unaffected: with no opponents on the board the runs are
-deterministic and repeat exactly.
+Solo comparisons are unaffected: with no opponents the runs are deterministic
+and repeat exactly. **Phase 25 removes this noise at its source**, so
+measurements from that phase on are exactly reproducible and the paired test is
+valid again.
 
 ---
 
 ## Tooling
 
-Nineteen scripts in `tools/`, each written for one job that came up in a phase.
-They are listed here because the apparatus is part of the method: several
-conclusions in this log depend on what these measure and on the protocol they
-enforce.
-
-**Measuring the environment** - run once, before any learning code existed.
+Nine entry points in `tools/`, mapped in `tools/README.md`. Four matter for
+reading this log:
 
 | | |
 |---|---|
-| `verify_mechanics.py` | bomb timing, how long smoke kills, whether blasts turn corners |
-| `verify_events.py` | how the framework delivers training callbacks (Phase 0) |
+| `train.py` | runs a curriculum over several seeds, then evaluates |
+| `evaluate.py` | the measurement harness; fixes the protocol above |
+| `audit_report.py` | re-derives every figure quoted here from the registry |
+| `verify_unchanged.py` | proves a change alters nothing, before it is trusted |
 
-**Running experiments.** `evaluate.py` is the library; the rest drive it.
-
-| | |
-|---|---|
-| `train.py` | runs a curriculum of phases over several seeds in parallel, writing each phase's full config next to its model |
-| `evaluate.py` | plays an agent under the fixed protocol and turns the framework's stats into metrics and a registry row |
-| `eval_existing.py` | re-measures models already on disk, without retraining |
-| `hpsearch.py` | random search with successive halving (Phase 21) |
-
-**Diagnosis** - used when a result was not what was expected.
-
-| | |
-|---|---|
-| `inspect_policy.py` | decodes the table into a readable policy; found the single row that was costing 82% of the score |
-| `analyse_bombs.py` | what the agent's bombs actually achieve, which the crate count alone hides |
-| `analyse_symmetry.py` | how much of the table is one situation seen from another angle |
-| `plot_curves.py` | learning curves from the per-episode logs |
-
-**Choosing and shipping a model.**
-
-| | |
-|---|---|
-| `select_final.py` | picks which seed to ship, on arenas not used to rank them |
-| `final_eval.py` | the decisive measurement of the shipped model |
-| `gate_check.py` | EXACT mode, which is what makes win rate and survival countable |
-| `submission_check.py` | the assignment's constraints: 0.5 s per step, no multiprocessing, no absolute paths, model loadable from any working directory |
-| `benchmark_latency.py` | worst-case decision time over the hardest boards |
-
-**References.** Without these there is no way to say whether a score is good.
-
-| | |
-|---|---|
-| `run_baselines.py` | the four agents shipped with the framework, under our own protocol |
-| `reference_winrate.py` | the reference agents re-measured at the same sample size we report |
-
-**Keeping the log honest.**
-
-| | |
-|---|---|
-| `audit_report.py` | re-derives every figure quoted here from the registry and fails if one has gone stale, or if a check cannot run |
-| `verify_unchanged.py` | proves a change leaves behaviour untouched before hours are spent on it - trains twice on identical seeds under two configs and compares the tables entry by entry |
-
-The last two exist because of specific failures. An observation cache that was
-believed to be exact silently changed what the agent saw, and cost every
-experiment that ran after it; `verify_unchanged.py` is what now catches that
-class of change before it is trusted. `audit_report.py` is what catches a number
-that was correct when written and stopped being correct later.
+The last two exist because of specific failures: an observation cache believed
+to be exact silently changed what the agent saw and cost every experiment after
+it, and figures that were correct when written stopped being correct later.
 
 ---
 
@@ -175,6 +134,7 @@ that was correct when written and stopped being correct later.
 | 22 | four candidate extensions to state and schedule | three hurt, one neutral | **all rejected** |
 | 23 | a bundled alternative configuration | 1v1 score 2.919 -> 3.727 | **see 24** |
 | 24 | the same models on the four-agent board | the 1v1 gain is worth nothing there | **rejected** |
+| 25 | seed the opponent; strip rejected code | measurements repeat exactly | **kept** |
 
 ---
 
@@ -1055,6 +1015,102 @@ on a 1v1 result is re-measured on the four-agent board before it is adopted.
 
 ---
 
+## Phase 25 - making the measurements repeatable, and shrinking the agent
+
+Three problems had accumulated that were about the apparatus rather than the
+agent: results that would not repeat, an agent file carrying code for features
+that had already been rejected, and nineteen scripts in `tools/` with no map.
+
+### 25.1 The noise had one cause, and it was fixable
+
+The noise floor recorded in Setup was treated for eight phases as a property of
+the game. It is not. Reading `rule_based_agent`:
+
+```
+np.random.seed()        line 69   <- no other np.random call anywhere
+shuffle(neighbors)      line 45   <- inside look_for_targets, the BFS
+shuffle(action_ideas)   line 140  <- fallback priority order
+```
+
+**Numpy is seeded but never used for a decision.** Every tie-break comes from the
+`random` module, which nothing seeds - and the one at line 45 sits inside the
+breadth-first search the opponent runs on *every step*, so it decides which of
+several equally short paths the opponent takes. That is the whole noise floor.
+
+`agent_code/rule_based_seeded/` is the same agent with `setup` seeding `random`
+from `OPP_SEED`. `evaluate.py` sets it to the arena seed and `train.py` to the
+training seed, so thirty arenas sample thirty reproducible opponents rather than
+one - reproducible without fitting a single set of tie-breaks.
+
+Measured on eight arenas, the same model, three repeats:
+
+| opponent | run 1 | run 2 | verdict |
+|---|---|---|---|
+| `rule_based_seeded`, same OPP_SEED | 32 score, 255 crates | 32, 255 | **identical** |
+| `rule_based_seeded`, different OPP_SEED | 32, 255 | different | behaviour still varies |
+| `rule_based_agent` (stock) | 18, 204 | 29, 217 | **does not repeat** |
+
+The stock agent is kept for the final check, because the tournament runs it.
+
+Repeating a whole measurement three times - one model, ten arenas, eight rounds
+each - puts a number on it:
+
+| opponent | three repeats of one measurement | sd |
+|---|---|---|
+| `rule_based_seeded` | 0.0875, 0.0875, 0.0875 | **0.0000** |
+| `rule_based_agent` | 0.1125, 0.2250, 0.1125 | 0.0650 |
+
+**The measurement noise is gone, not reduced.** Pairing now removes the opponent
+as well as the board, so the paired t test is a valid instrument again after
+being abandoned in Phase 17.
+
+### 25.2 The agent carried the features it had rejected
+
+`features.py` was 473 lines, of which about a quarter implemented components that
+were measured and rejected: `bomb_option` (Phase 5), `bomb_safety` and
+`escape_routes` (Phase 20), `bomb_hits`, `opponent_state` and `last_move`
+(Phase 22), and `_escape_exact` (a slower duplicate of the live escape search).
+`survival_table` supported only those, so it went too.
+
+| | before | after |
+|---|---|---|
+| `features.py` | 473 | 306 |
+| agent total | 1294 | 1058 |
+
+LAYOUT is unchanged, so **every model ever saved still loads**. The three slots
+those features filled are now held at a constant, which is what they already
+were with the flags off.
+
+Verified rather than assumed: the pre-strip and post-strip code were trained on
+identical seeds and the Q tables compared entry by entry - **identical on both
+seeds**, 133 and 127 rows. The rejected code is recoverable from git history;
+re-running one of those ablations means checking out the commit before this one.
+
+### 25.3 Tools grouped by job
+
+Nineteen scripts became nine entry points: four daily drivers, three
+subcommand groups (`diagnose`, `ship`, `reference`), the harness library, and a
+`phase0/` folder for the two scripts that ran once before the agent existed.
+`tools/README.md` is the map.
+
+One trap worth recording: the diagnostics group was first called `inspect`. A
+module named `inspect.py` on `sys.path` shadows the standard library's, which
+`dataclasses` imports, and *every* tool in the folder then fails with an error
+that names neither file.
+
+### 25.4 Two defects this surfaced
+
+- **`verify_unchanged.py` could not conclude anything.** Its default trained
+  against three unseeded opponents, so it reported BEHAVIOUR CHANGED when
+  comparing a config against itself. Caught by running that control before
+  trusting its verdict. It now runs solo by default.
+- **The shipped `model.pkl` no longer loads.** It was trained under the six-slot
+  layout; Phase 22 moved the encoding to eight. The load-time layout check
+  catches it, so the failure is loud rather than silent, but the agent as
+  committed cannot play. Listed under Open.
+
+---
+
 ## Final result
 
 The shipped model is `experiments/final_tabular_q/seed10/model.pkl`, chosen on
@@ -1113,44 +1169,54 @@ on the empty one.
 
 ## Settings currently in force
 
-These are the `config.py` defaults, which is what the tournament runs, since it
-starts the agent with no config file.
+The `config.py` defaults, which is what the tournament runs, since it starts the
+agent with no config file.
 
 ```
 alpha 0.1, alpha_schedule "visit", alpha_half_life 1000
 gamma 0.995
 exploration "epsilon", eps 1.0 -> 0.05 over 2000 episodes
-use_bomb_opt False, use_symmetry True, use_opponent_blocking True
+use_symmetry True, use_opponent_blocking True
 reward_bomb_wasted 0, shaping_weight 0
 rewards: coin +1, kill +5, crate +0.3, coin_found +0.1, invalid -0.5,
          wait -0.05, step -0.01, killed_self -5, got_killed -5
-budget: 12000 episodes on `classic` with opponents (config default n_episodes
-        6000 is per phase; the shipped model used two)
+budget: 12000 episodes on `classic` with opponents
 ```
 
 ## Rejected, with evidence
 
-`bomb_opt` feature - potential-based shaping - wasted-bomb penalty -
-Max-Boltzmann exploration (helpful at gamma 0.99 without symmetry, harmful with
-it) - curriculum `loot-crate` -> `classic` - gamma above 0.995 - gamma = 1 -
-`bomb_safety` - death penalty -15 - one step of memory - opponent-distance band -
-five-way `bomb_hits` - the Phase 23 bundle (wins 1v1, worth nothing at four
-agents).
+Each was measured, not argued about. Phase in brackets.
+
+| | |
+|---|---|
+| `bomb_opt` feature [4, 5] | coins -69%, suicide x8.8; ablation identified it as the cause |
+| potential-based shaping [6] | no effect, suicide x4 |
+| wasted-bomb penalty [6, 7] | no effect once the budget was raised (t=0.19) |
+| Max-Boltzmann exploration [8, 11] | helps at gamma 0.99 without symmetry, harmful with it |
+| curriculum `loot-crate` -> `classic` [9, 22] | t=+0.46; neutral again when re-tested properly |
+| gamma above 0.995, and gamma = 1 [11, 15] | mean down, variance x9 |
+| combining the marginal effects [13] | 7.41 against 8.88; the optimum had moved |
+| death penalty -15 [17b] | score -0.50 |
+| `bomb_safety` [20] | score -0.62, bombs +54% |
+| one step of memory, opponent distance, five-way `bomb_hits` [22] | all hurt; table size correlates -0.80 with score |
+| the Phase 23 bundle [23, 24] | wins 1v1 by 0.81, worth nothing at four agents |
 
 ## Open
 
-- **The agent is below the reference where it counts.** 2.275 on the four-agent
-  board against `rule_based_agent` at 3.260, and win rate 0.153 against 0.195.
-  Every phase from 16 on has moved this number by less than the gap.
-- **Separate the Phase 23 bundle.** It wins 1v1 by 0.81 with nine settings
-  changed at once and is worth nothing at four agents. Which parts carry the
-  crate-clearing gain, and whether any of them helps in the four-agent setting,
-  is unmeasured.
-- **Coin collection is the weakest component.** The bundle tripled crate
-  clearance without converting it into score, which points at what happens after
-  a crate breaks rather than at bombing.
-- **A second model.** The submission requires at least two, and this branch has
-  one function approximator (a table). Nothing here is a second model.
-- **Re-check against `settings.py`.** The mechanics measured in Phase 0 may be
-  changed by the course up to seven days before the agent deadline; every timing
-  constant in the danger schedule depends on them.
+1. **The agent is below the reference where it counts.** 2.275 on the four-agent
+   board against `rule_based_agent` at 3.260; win rate 0.153 against 0.195.
+2. **Nothing has made the agent bomb better.** Both interventions that raised the
+   four-agent score did it by bombing less. That is the substantive problem, and
+   it is where the remaining 1.0 point sits.
+3. **The shipped `model.pkl` does not load** under the current eight-slot layout
+   (Phase 25.4). The chosen configuration has to be retrained on the current
+   encoding before anything can be submitted.
+4. **Re-measure the baseline against the seeded opponent.** Phases 16-24 were
+   measured against the unseeded one. Expectation is unchanged, but a clean
+   anchor is needed before comparing new work to old numbers.
+5. **A second model.** The submission needs at least two and this branch has one
+   function approximator. Q against SARSA shares the table, the encoding and the
+   features, so it may not count as two.
+6. **Re-check against `settings.py`.** The course may change the mechanics up to
+   seven days before the agent deadline, and every timing constant in the danger
+   schedule depends on them.
