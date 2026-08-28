@@ -99,7 +99,12 @@ def run_seed(job):
             # passive one produces 400 steps. The learner then sees far more
             # passive transitions than bombing ones, which is self-reinforcing.
             cmd.append("--continue-without-training")
-        env = dict(os.environ, TQ_CONFIG=str(config_path))
+        # Training faces a seeded opponent too, so a run repeats. OPP_SEED is
+        # derived from the training seed, so each of the ten seeds meets a
+        # different but reproducible opponent rather than all ten meeting the
+        # same one. Ignored by the stock `rule_based_agent`.
+        env = dict(os.environ, TQ_CONFIG=str(config_path),
+                   OPP_SEED=str(TRAIN_SEED_BASE + seed_index))
         started = time.time()
         proc = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
         if proc.returncode != 0:

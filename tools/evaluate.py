@@ -100,7 +100,14 @@ def evaluate(agent, opponents, scenario, mode="fast", seeds=None, n_rounds=30,
     agents = [agent] + list(opponents)
     rounds_per_call = 1 if mode == "exact" else n_rounds
 
-    jobs = [(f"{tag}_{mode}_s{seed}", agents, scenario, rounds_per_call, seed, 0, extra_env)
+    # The opponent's seed is the arena's seed. `rule_based_seeded` reads OPP_SEED
+    # and seeds the `random` module from it, so each arena pairs with one fixed
+    # opponent behaviour and the whole measurement repeats exactly. Thirty arenas
+    # therefore sample thirty reproducible opponents rather than one, which keeps
+    # the estimate from fitting a single set of tie-breaks. The stock
+    # `rule_based_agent` ignores OPP_SEED entirely, so passing it is harmless.
+    jobs = [(f"{tag}_{mode}_s{seed}", agents, scenario, rounds_per_call, seed, 0,
+             dict(extra_env or {}, OPP_SEED=str(seed)))
             for seed in seeds]
     t0 = time.time()
     if workers > 1:
