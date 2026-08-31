@@ -15,6 +15,7 @@ step number -- it is the re-delivery) or flushes it first (different step number
 """
 
 import csv
+from collections import deque
 
 import numpy as np
 
@@ -45,8 +46,17 @@ def setup_training(self):
     # observation, or a different frame, than it was trained with.
     self.model.feature_flags = dict(features.FLAGS)
     self.model.feature_flags["use_symmetry"] = self.cfg.use_symmetry
+    if self.cfg.n_step > 1 and self.cfg.td_lambda > 0.0:
+        raise ValueError(
+            "n_step and td_lambda are two answers to the same question; "
+            "set one of them, not both")
     self.episode = 0
     self.pending = None
+    # n-step returns wait here until the window is full. Q(lambda) does not use
+    # it; the trace dictionary carries the same information incrementally.
+    self.buffer = deque()
+    self.traces = {}
+    self.action_was_greedy = True
     self.episode_reward = 0.0
     self.episode_coins = 0
     self.episode_crates = 0
@@ -129,8 +139,18 @@ def reward_from(self, events, old_game_state=None):
     return reward
 
 
+def _best_next(self, state):
+    """Bootstrap value of a state: max over *legal* actions only.
+
+    With BOMB masked out its row stays at zero, and a plain max would bootstrap
+    from that zero whenever every legal action is worth less -- an optimistic
+    target for an action the agent is not even allowed to take.
+    """
+    return float(np.max(self.model.values(state)[self.legal]))
+
+
 def _flush(self):
-    """Apply the Q-learning update for the staged transition, if any."""
+    """Hand the staged transition to whichever update rule is configured."""
     t = self.pending
     self.pending = None
     if t is None:
@@ -142,17 +162,87 @@ def _flush(self):
     self.episode_coins += t.coins
     self.episode_crates += t.crates
     self.bombs_dropped += t.bombs
+
+    if self.cfg.td_lambda > 0.0:
+        _lambda_update(self, t)
+        return
+
+    self.buffer.append(t)
     if t.terminal:
-        target = t.reward
-    else:
-        # Max over legal actions only. With BOMB masked out its row stays at
-        # zero, and a plain max would bootstrap from that zero whenever every
-        # legal action is worth less -- an optimistic target for an action the
-        # agent is not even allowed to take.
-        nxt = self.model.values(t.next_state)[self.legal]
-        target = t.reward + self.cfg.gamma * float(np.max(nxt))
-    alpha = self.model.effective_alpha(t.state, t.action, self.cfg)
-    self.model.update(t.state, t.action, target, alpha)
+        # The episode is over, so every transition still waiting gets the
+        # shortest return that is available to it rather than none at all.
+        while self.buffer:
+            _apply_n_step(self)
+    elif len(self.buffer) >= self.cfg.n_step:
+        _apply_n_step(self)
+
+
+def _apply_n_step(self):
+    """Update the oldest buffered transition from the window that follows it.
+
+    G = r_0 + gamma r_1 + ... + gamma^(k-1) r_(k-1) + gamma^k max_a Q(s_k, a),
+    truncated at the terminal transition when one falls inside the window. With
+    n_step = 1 this is exactly one-step Q-learning, which is what keeps the
+    default byte-identical to what came before.
+
+    The intermediate actions are not corrected for being off-policy. That is the
+    usual practical choice, and the bias it introduces is bounded by how often
+    exploration fires inside a window of n steps; Q(lambda) is the arm that
+    handles the same problem the principled way.
+    """
+    g = 0.0
+    discount = 1.0
+    bootstrap = None
+    for i, t in enumerate(self.buffer):
+        if i >= self.cfg.n_step:
+            break
+        g += discount * t.reward
+        discount *= self.cfg.gamma
+        if t.terminal:
+            bootstrap = None
+            break
+        bootstrap = t.next_state
+    if bootstrap is not None:
+        g += discount * _best_next(self, bootstrap)
+
+    head = self.buffer.popleft()
+    alpha = self.model.effective_alpha(head.state, head.action, self.cfg)
+    self.model.update(head.state, head.action, g, alpha)
+
+
+def _lambda_update(self, t):
+    """One step of Watkins's Q(lambda) with replacing traces.
+
+    The trace decay belongs after the update and depends on whether the *next*
+    action is greedy. By the time a transition reaches here the framework has
+    already asked for that next action, so `self.action_was_greedy` is exactly
+    the flag the algorithm wants.
+    """
+    cfg = self.cfg
+    key = (t.state, t.action)
+    self.traces[key] = 1.0                      # replacing trace
+    self.model.note_visit(t.state, t.action)
+
+    q_sa = float(self.model.values(t.state)[t.action])
+    target = t.reward if t.terminal else t.reward + cfg.gamma * _best_next(self, t.next_state)
+    delta = target - q_sa
+
+    alpha = self.model.effective_alpha(t.state, t.action, cfg)
+    for (state, action), trace in self.traces.items():
+        self.model.add(state, action, alpha * delta * trace)
+
+    if t.terminal:
+        self.traces.clear()
+        return
+    if not self.action_was_greedy:
+        # Watkins cuts here: beyond a non-greedy action the return no longer
+        # estimates the greedy policy, so carrying the trace further would
+        # credit states for a path the target policy would not have taken.
+        self.traces.clear()
+        return
+    decay = cfg.gamma * cfg.td_lambda
+    floor = cfg.trace_floor
+    self.traces = {k: v * decay for k, v in self.traces.items() if v * decay > floor}
 
 
 def game_events_occurred(self, old_game_state, self_action, new_game_state, events):
@@ -201,6 +291,14 @@ def end_of_round(self, last_game_state, last_action, events):
             bombs=events.count(e.BOMB_DROPPED),
         )
         _flush(self)
+
+    # Nothing may survive into the next episode: a trace or a half-filled window
+    # would credit the first states of the new round with the last round's
+    # reward. `last_action is None` is the one path that stages no terminal
+    # transition, so the drain here is not always a no-op.
+    while self.buffer:
+        _apply_n_step(self)
+    self.traces.clear()
 
     self.episode += 1
     _decay_epsilon(self)

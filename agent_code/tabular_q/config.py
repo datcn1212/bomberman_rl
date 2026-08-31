@@ -16,6 +16,22 @@ class Config:
     # --- learning ---------------------------------------------------------
     alpha: float = 0.1
     gamma: float = 0.995
+
+    # How far the reward is carried back in one update. A bomb pays off 4-5
+    # decisions after it is placed (features.HORIZON), so one-step TD has to
+    # push that signal back through five separate table updates, each damped by
+    # alpha. n_step = 1 is plain one-step Q-learning and is the default.
+    n_step: int = 1
+
+    # Watkins's Q(lambda): eligibility traces that decay by gamma*lambda and are
+    # cut whenever a non-greedy action is taken, which is what keeps the
+    # off-policy target honest. 0.0 disables traces. Mutually exclusive with
+    # n_step > 1 - they are two answers to the same question.
+    td_lambda: float = 0.0
+
+    # Traces below this are dropped, which bounds the dictionary without
+    # changing the arithmetic in any way that a float can see.
+    trace_floor: float = 1e-4
     # "constant" keeps alpha fixed, which violates the Robbins-Monro condition
     # sum(alpha^2) < inf: the estimate never settles, it random-walks around the
     # true value forever. "visit" divides by the visit count of the individual

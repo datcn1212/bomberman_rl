@@ -65,6 +65,12 @@ def act(self, game_state):
         choice = explore(self, values)
     else:
         choice = greedy(self.rng, values)
+    # Watkins's Q(lambda) cuts the trace when the action taken is not greedy.
+    # The test is on the *value*, not on which branch above was taken: an
+    # exploratory draw that happens to land on a best action is still greedy in
+    # the sense the algorithm means, and cutting there would throw away a trace
+    # for no reason.
+    self.action_was_greedy = bool(values[choice] == values.max())
     action = from_frame(perm, int(self.legal[choice]))
 
     if self.bomb_log is not None:

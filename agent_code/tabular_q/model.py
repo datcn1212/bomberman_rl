@@ -180,6 +180,28 @@ class QModel:
         self.seen[state][action] += 1
         row[action] += alpha * (target - row[action])
 
+    def add(self, state, action, amount):
+        """Add a raw amount to one entry, without counting it as a visit.
+
+        Eligibility traces spread a single TD error over every pair still in the
+        trace, but only one of those pairs was actually visited this step. Using
+        `update` for all of them would inflate the visit counts and collapse the
+        step size for a state the agent has barely seen.
+        """
+        row = self.q.get(state)
+        if row is None:
+            row = np.zeros(N_ACTIONS, dtype=np.float64)
+            self.q[state] = row
+            self.seen[state] = np.zeros(N_ACTIONS, dtype=np.int64)
+        row[action] += amount
+
+    def note_visit(self, state, action):
+        """Count one genuine visit, creating the row if it is new."""
+        if state not in self.q:
+            self.q[state] = np.zeros(N_ACTIONS, dtype=np.float64)
+            self.seen[state] = np.zeros(N_ACTIONS, dtype=np.int64)
+        self.seen[state][action] += 1
+
     def effective_alpha(self, state, action, cfg):
         """Step size for one update.
 
