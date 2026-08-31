@@ -17,8 +17,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from tools.evaluate import (EVAL_SEEDS, evaluate, format_metrics,  # noqa: E402
-                            register)
+from tools.evaluate import (EVAL_SEEDS, config_env_var, evaluate,  # noqa: E402
+                            format_metrics, register)
 
 EXPERIMENTS = ROOT / "experiments"
 
@@ -55,7 +55,7 @@ def main():
         tag = "%s_seed%d" % (args.exp_id, seed)
         metrics = evaluate(args.agent, args.opponents, args.scenario,
                            mode=args.mode, seeds=EVAL_SEEDS, n_rounds=args.rounds,
-                           tag=tag, extra_env={"TQ_CONFIG": str(cfg_path)},
+                           tag=tag, extra_env={config_env_var(args.agent): str(cfg_path)},
                            workers=args.workers)
         print(format_metrics(metrics), flush=True)
         register(metrics, exp_id=tag, note=args.note)
