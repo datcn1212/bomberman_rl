@@ -136,3 +136,28 @@ def test_both_backups_at_once_is_refused():
     self.episode = 0
     with pytest.raises(ValueError):
         T.setup_training(self)
+
+
+def test_each_traced_pair_uses_its_own_step_size():
+    """Regression: sharing one alpha across the trace diverges.
+
+    A pair the agent has visited thousands of times must keep its own decayed
+    step size even when the TD error arrives from a freshly discovered state.
+    Borrowing the visitor's alpha lets settled entries take full-sized steps and
+    sends Q to NaN a few thousand episodes into training.
+    """
+    self = make_agent(td_lambda=0.9, alpha=1.0, alpha_schedule="visit",
+                      alpha_half_life=1.0, gamma=1.0)
+    # (10, UP) is well travelled; (20, UP) is new.
+    for _ in range(100):
+        self.model.note_visit(10, 0)
+
+    step(self, 10, 0, 0.0, 20)          # puts (10, UP) into the trace
+    settled_before = self.model.values(10)[0]
+    fresh_before = self.model.values(20)[0]
+    step(self, 20, 0, 1.0, 30)          # TD error arrives from the new state
+
+    settled_move = abs(self.model.values(10)[0] - settled_before)
+    fresh_move = abs(self.model.values(20)[0] - fresh_before)
+    # Same delta, same-order traces: the gap can only come from the step size.
+    assert fresh_move > 10 * settled_move

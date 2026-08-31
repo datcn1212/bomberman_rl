@@ -219,17 +219,24 @@ def _lambda_update(self, t):
     the flag the algorithm wants.
     """
     cfg = self.cfg
-    key = (t.state, t.action)
-    self.traces[key] = 1.0                      # replacing trace
-    self.model.note_visit(t.state, t.action)
+    self.traces[(t.state, t.action)] = 1.0      # replacing trace
 
     q_sa = float(self.model.values(t.state)[t.action])
     target = t.reward if t.terminal else t.reward + cfg.gamma * _best_next(self, t.next_state)
     delta = target - q_sa
 
-    alpha = self.model.effective_alpha(t.state, t.action, cfg)
+    # Every traced pair is stepped by *its own* alpha, not by the alpha of the
+    # pair that happens to be visited now. Sharing one alpha lets a pair seen
+    # ten thousand times - whose own step size has long since decayed - keep
+    # taking full-sized steps borrowed from some freshly discovered state, which
+    # breaks the Robbins-Monro condition the visit schedule exists to satisfy
+    # and sends Q to NaN a few thousand episodes in.
     for (state, action), trace in self.traces.items():
+        alpha = self.model.effective_alpha(state, action, cfg)
         self.model.add(state, action, alpha * delta * trace)
+    # Counted after the updates, matching the one-step path where the step size
+    # is read before `update` increments the counter.
+    self.model.note_visit(t.state, t.action)
 
     if t.terminal:
         self.traces.clear()
