@@ -51,6 +51,11 @@ CLAIMS = [
     ("final model, ranking block",      "final_tabular_q", 3, "mean_score", 2.221),
     ("Phase 26 anchor, seeded",         "p26_anchor",      3, "mean_score", 2.210),
     ("Phase 26 anchor, stock",          "p26_anchor_stock", 3, "mean_score", 2.216),
+    ("Phase 27 n=3",                    "p27_n3",          3, "mean_score", 1.677),
+    ("Phase 27 n=5",                    "p27_n5",          3, "mean_score", 0.985),
+    ("Phase 27 n=8",                    "p27_n8",          3, "mean_score", 0.053),
+    ("Phase 27 lambda=0.8",             "p27_lam080",      3, "mean_score", 2.159),
+    ("Phase 27 lambda=0.9",             "p27_lam090",      3, "mean_score", 1.857),
 ]
 
 # The three runs of one identical configuration that size the noise floor.

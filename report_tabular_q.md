@@ -136,6 +136,7 @@ it, and figures that were correct when written stopped being correct later.
 | 24 | the same models on the four-agent board | the 1v1 gain is worth nothing there | **rejected** |
 | 25 | seed the opponent; strip rejected code | measurements repeat exactly | **kept** |
 | 26 | re-anchor on the current encoding | 2.210, and the seeded opponent is unbiased | **kept** |
+| 27 | multi-step credit assignment (n-step, Q(lambda)) | n-step harmful, Q(lambda) neutral | **rejected** |
 
 ---
 
@@ -1170,6 +1171,103 @@ broken tool. A third name, `tools/phase0/events.py`, shadowed the framework's ow
 something importable. It asks `importlib.util.find_spec` from outside the
 repository, because the obvious test - globbing the standard library for `*.py` -
 misses exactly the case that caused the damage: `select` is a C extension.
+
+---
+
+## Phase 27 - multi-step credit assignment
+
+Every intervention that has raised the four-agent score did it by bombing *less*;
+nothing has made the agent bomb *better*. One explanation does not involve the
+state at all. A bomb detonates four decisions after it is placed and its blast is
+lethal on that decision and the next, so the reward it earns arrives four to five
+steps later. One-step TD has to push that signal back through five separate table
+updates, each damped by the step size. If that is the bottleneck, a longer backup
+should fix it - and it would cost nothing in table size, which is the constraint
+that Phase 22 measured at a correlation of -0.80 against score.
+
+Two backups, five arms, all against the Phase 26 anchor on the same ten seeds.
+
+### 27.1 n-step returns: harmful, and monotonically so
+
+| n | score | vs anchor | paired t | bombs | crates | self-kill |
+|---|---|---|---|---|---|---|
+| 1 (anchor) | **2.210** | - | - | 17.9 | 35.4 | 0.527 |
+| 3 | 1.677 | -0.533 | -1.83 | 11.5 | 27.5 | 0.536 |
+| 5 | 0.985 | -1.226 | **-4.57** | 7.4 | 18.7 | 0.481 |
+| 8 | 0.053 | -2.157 | **-12.87** | 1.5 | 4.2 | **0.940** |
+
+At n = 8 the agent has almost stopped bombing - 1.5 bombs a round against 17.9 -
+and still kills itself in 94% of rounds, which is to say that nearly every bomb it
+does place is fatal.
+
+The monotonicity is the diagnosis. Epsilon starts at 1.0 and decays over 2000 of
+the 6000 episodes, so for the first third of training the actions *after* a bomb
+is placed are close to random, and walking at random beside a live bomb kills.
+With n = 1 that death reaches the BOMB action only through five layers of
+bootstrapping, heavily damped. With n = 8 it lands directly in the return for
+BOMB itself.
+
+So the uncorrected n-step return teaches, accurately, that *bombing followed by
+random behaviour is fatal*. That is true of the exploring policy and false of the
+greedy one, and it does maximum damage to precisely the action the change was
+meant to help.
+
+### 27.2 Watkins's Q(lambda): neutral, and it explains 27.1
+
+| lambda | score | vs anchor | paired t | bombs | coins | kills |
+|---|---|---|---|---|---|---|
+| - (anchor) | **2.210** | - | - | 17.9 | 1.679 | 0.106 |
+| 0.8 | 2.159 | -0.052 | **-0.30** | 14.7 | 1.755 | 0.081 |
+| 0.9 | 1.857 | -0.353 | -1.48 | 12.5 | 1.530 | 0.065 |
+
+Q(lambda) carries the same idea as an n-step return and differs in one respect:
+Watkins cuts the trace at any action that is not greedy. It does not collapse.
+That isolates the off-policy bias, and not the length of the backup, as what
+destroyed 27.1.
+
+The cut turns out to adapt on its own. Logging the trace during training:
+
+| episode | mean trace length | fraction cut |
+|---|---|---|
+| 500 | 1.38 | 0.71 |
+| 1500 | 2.63 | 0.33 |
+| 2500 | 7.98 | 0.04 |
+| 3000 | 8.59 | 0.05 |
+
+While the policy is still random the trace is cut almost every step and Q(lambda)
+is one-step learning in disguise - which is exactly the protection n-step lacked.
+Once epsilon settles, traces run about 8.6 steps, comfortably past the four to
+five the bomb needs.
+
+That table also settles how far the result reaches. The mechanism was genuinely
+engaged over the last two thirds of training, at a length that covers the delay
+in question, and it bought nothing (t = -0.30). This is a tested hypothesis, not
+an untested one.
+
+**Verdict: rejected. Credit assignment is not the bottleneck.** A correct fix and
+an incorrect one were both applied to the delay between placing a bomb and being
+paid for it, and neither moved the score. Whatever stops this agent from bombing
+well, it is not that the reward arrives late.
+
+### 27.3 A step size shared across a trace diverges
+
+Both lambda arms first died with Q at NaN, in `greedy`, where an all-NaN row
+leaves the argmax empty. The cause was in the new code rather than in the
+algorithm: one step size, read from the pair being visited, was applied to every
+pair in the trace. A pair visited ten thousand times - whose own step size has
+long since decayed toward zero - kept taking full-sized steps borrowed from
+whatever state had just been discovered, which is a direct breach of the
+Robbins-Monro condition the visit schedule exists to satisfy. Peak |Q| at 1000
+episodes was 47.8 against 7.45 for the control.
+
+Giving each traced pair its own step size fixes it: 4.33 at the same point, and
+flat at 4.44 by episode 2000. A regression test now asserts that a pair visited a
+hundred times moves less than a tenth as far as a fresh one under the same TD
+error.
+
+Worth recording that the wrong choice shipped with a comment justifying it. The
+comment was plausible; the reasoning was wrong; and the failure only surfaced
+several thousand episodes into a run that had already cost an hour and a half.
 
 ---
 
