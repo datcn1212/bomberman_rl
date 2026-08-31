@@ -163,9 +163,9 @@ def game_events_occurred(self, old_game_state, self_action, new_game_state, even
     if old_game_state is None or self_action is None:
         return
     _flush(self)
-    old_phi, old_obs, old_perm = observe_and_encode(
+    old_phi, old_obs, old_perm, _ = observe_and_encode(
         old_game_state, self.cfg.use_symmetry)
-    new_phi, new_obs, _ = observe_and_encode(
+    new_phi, new_obs, _, _ = observe_and_encode(
         new_game_state, self.cfg.use_symmetry)
     shaping = (self.cfg.gamma * _potential(self, new_obs)) - _potential(self, old_obs)
     self.pending = Transition(
@@ -191,7 +191,7 @@ def end_of_round(self, last_game_state, last_action, events):
             _flush(self)
         # Terminal transition: Ng et al. require Phi(terminal) = 0 for the
         # policy-invariance guarantee, so the shaping term is just -Phi(s).
-        last_phi, last_obs, last_perm = observe_and_encode(
+        last_phi, last_obs, last_perm, _ = observe_and_encode(
             last_game_state, self.cfg.use_symmetry)
         self.pending = Transition(
             step=last_game_state["step"],

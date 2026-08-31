@@ -4,26 +4,38 @@ Q(s, a) = phi(s) . w[:, a] - a linear approximator, replacing the tabular
 agent's dict-of-rows with a dense weight matrix shared across every state.
 
 phi(s) one-hot encodes every categorical component of the observation, adds
-one normalised scalar for target distance, one interaction flag, and a bias
-term. Three slots the observation still carries - bomb_opt, opponent,
-last_move - are held at a constant value on this branch (see
-tabular_q/features.py, Phase 25), so one-hot encoding them would spend three
-weight rows on columns that are always 1 at index 0 and never move: dead
-weight, not dead code. They are left out of phi() rather than encoded
-uselessly, and adding them back is a one-line change if a later phase turns
-any of them back on.
+one normalised scalar for target distance, and a bias term. Three slots the
+observation still carries - bomb_opt, opponent, last_move - are held at a
+constant value on this branch (see tabular_q/features.py, Phase 25), so
+one-hot encoding them would spend three weight rows on columns that are
+always 1 at index 0 and never move: dead weight, not dead code. They are left
+out of phi() rather than encoded uselessly, and adding them back is a
+one-line change if a later phase turns any of them back on.
 
-The interaction flag exists because pure one-hot main effects cannot represent
-"blocked overrides everything else": move_status and target_dir are separate
-additive blocks, so nothing stops their weights from summing to favour a
-direction that is a wall. Phase 1 hit this directly - a state where target_dir
-pointed straight into a blocked neighbour, Q for that direction was still the
-highest of five legal actions, the move was invalid, the position did not
-change, and the identical state repeated the identical choice for the rest of
-the episode. `target_blocked` is 1.0 exactly in that situation and 0.0
-otherwise, giving the model one dedicated weight per action to suppress it
-without asking the additive move_status/target_dir combination to do that job
-on its own.
+Phase 1 found a greedy policy walking straight into a wall, forever: at one
+state Q(a blocked direction) was the highest of five legal actions, the move
+was invalid, the position did not change, and the identical state produced
+the identical choice for the rest of the episode. The first fix tried was an
+interaction feature, `target_dir points at a blocked neighbour`, on the
+theory that additive one-hot main effects cannot represent "blocked overrides
+everything else". That diagnosis of the *mechanism* was right but the
+specific trigger was wrong: `target_search` (features.py) only ever seeds its
+search from walkable neighbours, so target_dir can never point at a blocked
+tile - the feature's weight column stayed at exactly zero through 2000
+episodes because its precondition is unreachable, which is why training and
+evaluation reproduced bit-for-bit identical to the version without it. The
+actual failure was a blocked direction outscoring the others regardless of
+where the target pointed, which nothing this narrow could fix.
+
+The real fix is not a phi() feature: it is that a state whose Q-values were
+not yet trained enough to rank a wall correctly should never have been asked
+to. `callbacks.act` now excludes blocked directions from the candidate set
+before greedy or exploratory selection - the same mechanism BOMB already uses
+when `allow_bomb` is off, extended to run every step instead of once at
+setup. This does not remove anything the model has to learn: Q(blocked
+direction) is still computed and still updated by whatever transition
+actually visits it, it is only kept out of the *decision*, exactly as
+excluding BOMB never stopped the agent from having a Q-value for it.
 
 D4 canonicalisation is reused exactly as tabular_q established it: among the
 eight rotations and reflections, `canonical()` picks the same one it always
@@ -41,7 +53,7 @@ import numpy as np
 from .features import ACTIONS, BLOCKED, DIR_HERE, DIR_NONE, observe
 
 N_ACTIONS = len(ACTIONS)
-FEATURE_VERSION = 2  # bumped: target_blocked interaction feature added
+FEATURE_VERSION = 3  # bumped: target_blocked removed (see module docstring)
 
 # --- categorical component sizes -------------------------------------------
 # Four neighbours, each one of {blocked, free-safe, free-lethal}.
@@ -51,14 +63,12 @@ N_TARGET_DIR = 6      # none, 4 directions, "already there"
 N_TARGET_KIND = 2      # crate, coin
 N_ESCAPE_DIR = 6      # none, 4 directions, "staying put is safe"
 
-# One normalised scalar (target_dist / cap), one interaction flag
-# (target_blocked), plus a bias term.
+# One normalised scalar (target_dist / cap) plus a bias term.
 N_CONTINUOUS = 1
-N_INTERACTION = 1
 N_BIAS = 1
 
 PHI_DIM = (N_MOVE_STATUS + N_T_HERE + N_TARGET_DIR + N_TARGET_KIND
-          + N_ESCAPE_DIR + N_CONTINUOUS + N_INTERACTION + N_BIAS)
+          + N_ESCAPE_DIR + N_CONTINUOUS + N_BIAS)
 
 _TARGET_DIST_CAP = 15.0
 
@@ -176,11 +186,6 @@ def vectorize(move_status, t_here, target_dir, target_kind, escape_dir, target_d
     offset = _one_hot(escape_dir, N_ESCAPE_DIR, phi, offset)
     phi[offset] = min(target_dist, _TARGET_DIST_CAP) / _TARGET_DIST_CAP
     offset += N_CONTINUOUS
-    # 1.0 exactly when the direction the agent is being pulled towards is a
-    # wall: see the module docstring for why the additive one-hot blocks
-    # cannot express this override on their own.
-    phi[offset] = 1.0 if target_dir in (1, 2, 3, 4) and move_status[target_dir - 1] == BLOCKED else 0.0
-    offset += N_INTERACTION
     phi[offset] = 1.0  # bias
     offset += N_BIAS
     assert offset == PHI_DIM
@@ -188,7 +193,14 @@ def vectorize(move_status, t_here, target_dir, target_kind, escape_dir, target_d
 
 
 def observe_and_encode(game_state, use_symmetry):
-    """The observation, its feature vector, and the frame it was vectorised in.
+    """The observation, its feature vector, the frame it was vectorised in, and
+    the move_status *in that same frame*.
+
+    `status` is returned separately from `obs` because `obs.move_status` is the
+    raw, unrotated field: with symmetry on, the Q-values in `phi` are indexed by
+    canonical-frame directions, so a caller that wants to know which of *those*
+    four directions is blocked - to keep a decision from choosing one, for
+    instance - needs the relabelled version, not the raw one.
 
     Mirrors tabular_q's function of the same name and same contract: not
     memoised, for the same reason (Phase 25.4 in the tabular_q report - the
@@ -203,7 +215,7 @@ def observe_and_encode(game_state, use_symmetry):
         status, target_dir, escape_dir = obs.move_status, obs.target_dir, obs.escape_dir
     phi = vectorize(status, obs.t_here, target_dir, obs.target_kind, escape_dir,
                     obs.target_dist)
-    return phi, obs, perm
+    return phi, obs, perm, status
 
 
 class LinearQModel:

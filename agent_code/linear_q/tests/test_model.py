@@ -83,3 +83,48 @@ def test_load_rejects_a_model_with_a_different_phi_dim():
         m.save(f.name)
         with pytest.raises(ValueError):
             LinearQModel.load(f.name)
+
+
+# --- masking blocked directions (Phase 1's infinite loop) ------------------
+
+def test_a_blocked_direction_is_never_chosen_even_when_its_q_value_is_highest():
+    """Regression: Phase 1 found a state where Q(a blocked direction) was the
+    highest of five legal actions - additive one-hot features give no guarantee
+    against that - so the greedy move was invalid, the position never changed,
+    and the identical choice repeated for the rest of the episode.
+
+    This does not test phi() or the update rule; it tests that `act()` refuses
+    to hand a blocked direction to greedy/explore in the first place,
+    regardless of what the model predicts for it.
+    """
+    import types
+
+    from agent_code.linear_q import callbacks as cb
+    from agent_code.linear_q.features import ACTIONS, BLOCKED, FREE_SAFE
+
+    self = types.SimpleNamespace()
+    self.train = False
+    self.cfg = types.SimpleNamespace(use_symmetry=False)
+    self.legal = np.arange(5)             # UP RIGHT DOWN LEFT WAIT, no bomb
+    self.rng = np.random.default_rng(0)
+
+    class RiggedModel:
+        """Always ranks DOWN (index 2) highest, blocked or not - the exact
+        shape of the failure the real model produced."""
+        def values(self, phi):
+            return np.array([1.0, 1.0, 100.0, 1.0, 1.0, 0.0])
+
+    self.model = RiggedModel()
+    self.bomb_log = None
+
+    field = np.zeros((9, 9), dtype=int)
+    field[0, :] = field[-1, :] = field[:, 0] = field[:, -1] = -1
+    field[1, 2] = -1   # wall directly south of the agent: DOWN is blocked
+    game_state = {
+        "field": field, "self": ("me", 0, True, (1, 1)), "coins": [],
+        "bombs": [], "explosion_map": np.zeros_like(field), "others": [],
+        "step": 1, "round": 1,
+    }
+
+    action = cb.act(self, game_state)
+    assert action != "DOWN"

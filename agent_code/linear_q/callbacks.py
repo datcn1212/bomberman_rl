@@ -11,7 +11,7 @@ import numpy as np
 
 from . import config
 from . import features
-from .features import ACTIONS
+from .features import ACTIONS, BLOCKED
 from .model import LinearQModel, from_frame, observe_and_encode
 
 MODEL_FILE = "model.pkl"
@@ -51,15 +51,30 @@ def setup(self):
 def act(self, game_state):
     # `perm` is the frame phi() was vectorised in: with symmetry on, the chosen
     # action has to be translated back out of the canonical frame before it is
-    # returned to the game.
-    phi, _, perm = observe_and_encode(game_state, self.cfg.use_symmetry)
-    values = self.model.values(phi)[self.legal]
+    # returned to the game. `status` is move_status in that same frame, so it
+    # indexes the same four directions `values` does.
+    phi, _, perm, status = observe_and_encode(game_state, self.cfg.use_symmetry)
+    values = self.model.values(phi)
+
+    # A move into a wall is invalid regardless of what the model predicts for
+    # it - Q(blocked direction) can still rank highest, because move_status and
+    # target_dir are separate additive features and nothing forces "blocked"
+    # to dominate their sum (see model.py's module docstring for how this was
+    # found: a greedy policy that walked into a wall and, since the position
+    # and therefore the state never changed, repeated the identical invalid
+    # choice for the rest of the episode). Excluding it here is the same
+    # mechanism already used for BOMB when `allow_bomb` is off, just decided
+    # every step instead of once at setup: the model still computes and still
+    # updates Q for a blocked direction whenever a transition visits it, it is
+    # only kept out of the decision.
+    candidates = [a for a in self.legal if a >= 4 or status[a] != BLOCKED]
+    values = values[candidates]
 
     if self.train and self.rng.random() < self.epsilon:
         choice = explore(self, values)
     else:
         choice = greedy(self.rng, values)
-    action = from_frame(perm, int(self.legal[choice]))
+    action = from_frame(perm, int(candidates[choice]))
 
     if self.bomb_log is not None:
         _record_bomb(self, game_state, action)
