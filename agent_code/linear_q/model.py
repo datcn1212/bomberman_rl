@@ -3,14 +3,27 @@
 Q(s, a) = phi(s) . w[:, a] - a linear approximator, replacing the tabular
 agent's dict-of-rows with a dense weight matrix shared across every state.
 
-phi(s) one-hot encodes every categorical component of the observation and adds
-one normalised scalar for target distance, plus a bias term. Three slots the
-observation still carries - bomb_opt, opponent, last_move - are held at a
-constant value on this branch (see tabular_q/features.py, Phase 25), so
-one-hot encoding them would spend three weight rows on columns that are always
-1 at index 0 and never move: dead weight, not dead code. They are left out of
-phi() rather than encoded uselessly, and adding them back is a one-line change
-if a later phase turns any of them back on.
+phi(s) one-hot encodes every categorical component of the observation, adds
+one normalised scalar for target distance, one interaction flag, and a bias
+term. Three slots the observation still carries - bomb_opt, opponent,
+last_move - are held at a constant value on this branch (see
+tabular_q/features.py, Phase 25), so one-hot encoding them would spend three
+weight rows on columns that are always 1 at index 0 and never move: dead
+weight, not dead code. They are left out of phi() rather than encoded
+uselessly, and adding them back is a one-line change if a later phase turns
+any of them back on.
+
+The interaction flag exists because pure one-hot main effects cannot represent
+"blocked overrides everything else": move_status and target_dir are separate
+additive blocks, so nothing stops their weights from summing to favour a
+direction that is a wall. Phase 1 hit this directly - a state where target_dir
+pointed straight into a blocked neighbour, Q for that direction was still the
+highest of five legal actions, the move was invalid, the position did not
+change, and the identical state repeated the identical choice for the rest of
+the episode. `target_blocked` is 1.0 exactly in that situation and 0.0
+otherwise, giving the model one dedicated weight per action to suppress it
+without asking the additive move_status/target_dir combination to do that job
+on its own.
 
 D4 canonicalisation is reused exactly as tabular_q established it: among the
 eight rotations and reflections, `canonical()` picks the same one it always
@@ -25,10 +38,10 @@ import pickle
 
 import numpy as np
 
-from .features import ACTIONS, DIR_HERE, DIR_NONE, observe
+from .features import ACTIONS, BLOCKED, DIR_HERE, DIR_NONE, observe
 
 N_ACTIONS = len(ACTIONS)
-FEATURE_VERSION = 1
+FEATURE_VERSION = 2  # bumped: target_blocked interaction feature added
 
 # --- categorical component sizes -------------------------------------------
 # Four neighbours, each one of {blocked, free-safe, free-lethal}.
@@ -38,12 +51,14 @@ N_TARGET_DIR = 6      # none, 4 directions, "already there"
 N_TARGET_KIND = 2      # crate, coin
 N_ESCAPE_DIR = 6      # none, 4 directions, "staying put is safe"
 
-# One normalised scalar (target_dist / cap) plus a bias term.
+# One normalised scalar (target_dist / cap), one interaction flag
+# (target_blocked), plus a bias term.
 N_CONTINUOUS = 1
+N_INTERACTION = 1
 N_BIAS = 1
 
 PHI_DIM = (N_MOVE_STATUS + N_T_HERE + N_TARGET_DIR + N_TARGET_KIND
-          + N_ESCAPE_DIR + N_CONTINUOUS + N_BIAS)
+          + N_ESCAPE_DIR + N_CONTINUOUS + N_INTERACTION + N_BIAS)
 
 _TARGET_DIST_CAP = 15.0
 
@@ -161,6 +176,11 @@ def vectorize(move_status, t_here, target_dir, target_kind, escape_dir, target_d
     offset = _one_hot(escape_dir, N_ESCAPE_DIR, phi, offset)
     phi[offset] = min(target_dist, _TARGET_DIST_CAP) / _TARGET_DIST_CAP
     offset += N_CONTINUOUS
+    # 1.0 exactly when the direction the agent is being pulled towards is a
+    # wall: see the module docstring for why the additive one-hot blocks
+    # cannot express this override on their own.
+    phi[offset] = 1.0 if target_dir in (1, 2, 3, 4) and move_status[target_dir - 1] == BLOCKED else 0.0
+    offset += N_INTERACTION
     phi[offset] = 1.0  # bias
     offset += N_BIAS
     assert offset == PHI_DIM

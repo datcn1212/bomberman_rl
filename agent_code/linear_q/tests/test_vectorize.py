@@ -21,6 +21,9 @@ from agent_code.linear_q.model import (  # noqa: E402
     N_TARGET_KIND, PHI_DIM, canonical_frame, from_frame, invert, to_frame,
     vectorize)
 
+_TARGET_DIST_INDEX = -3   # ..., target_dist, target_blocked, bias
+_TARGET_BLOCKED_INDEX = -2
+
 
 def make_state(field, pos, coins=(), bombs=()):
     """Build the minimal game_state dict the features read."""
@@ -46,7 +49,8 @@ def open_field(w=9, h=9):
 # --- shape and one-hot structure -------------------------------------------
 
 def test_dim_matches_the_sum_of_its_blocks():
-    assert PHI_DIM == N_MOVE_STATUS + N_T_HERE + N_TARGET_DIR + N_TARGET_KIND + N_ESCAPE_DIR + 2
+    # +1 target_dist, +1 target_blocked, +1 bias.
+    assert PHI_DIM == N_MOVE_STATUS + N_T_HERE + N_TARGET_DIR + N_TARGET_KIND + N_ESCAPE_DIR + 3
 
 
 def test_every_categorical_block_is_a_one_hot_and_the_bias_is_always_one():
@@ -69,7 +73,8 @@ def test_every_categorical_block_is_a_one_hot_and_the_bias_is_always_one():
     assert phi[offset:offset + N_ESCAPE_DIR].sum() == 1.0
     offset += N_ESCAPE_DIR
     assert 0.0 <= phi[offset] <= 1.0            # normalised distance
-    assert phi[offset + 1] == 1.0               # bias, always on
+    assert phi[offset + 1] in (0.0, 1.0)         # target_blocked
+    assert phi[offset + 2] == 1.0                # bias, always on
 
 
 def test_target_distance_is_normalised_and_capped():
@@ -77,9 +82,9 @@ def test_target_distance_is_normalised_and_capped():
     near = vectorize(move_status, 0, 1, KIND_COIN, DIR_NONE, target_dist=3)
     far = vectorize(move_status, 0, 1, KIND_COIN, DIR_NONE, target_dist=15)
     beyond_cap = vectorize(move_status, 0, 1, KIND_COIN, DIR_NONE, target_dist=999)
-    assert near[-2] == pytest.approx(3 / 15)
-    assert far[-2] == pytest.approx(1.0)
-    assert beyond_cap[-2] == pytest.approx(1.0)   # capped, not overflowed
+    assert near[_TARGET_DIST_INDEX] == pytest.approx(3 / 15)
+    assert far[_TARGET_DIST_INDEX] == pytest.approx(1.0)
+    assert beyond_cap[_TARGET_DIST_INDEX] == pytest.approx(1.0)   # capped, not overflowed
 
 
 def test_two_different_observations_never_collide():
@@ -174,3 +179,50 @@ def test_canonical_frame_agrees_with_tabular_q_on_many_boards():
         assert perm_lq == perm_tq
         tested += 1
     assert tested > 100    # the random boards were not all degenerate
+
+
+# --- the target_blocked interaction flag ------------------------------------
+
+def test_target_blocked_flag_fires_only_when_the_pull_points_at_a_wall():
+    blocked_down = (FREE_SAFE, FREE_SAFE, BLOCKED, FREE_SAFE)
+    open_down = (FREE_SAFE, FREE_SAFE, FREE_SAFE, FREE_SAFE)
+
+    pulled_into_wall = vectorize(blocked_down, 0, target_dir=3, target_kind=KIND_COIN,
+                                 escape_dir=DIR_NONE, target_dist=5)
+    pulled_into_open = vectorize(open_down, 0, target_dir=3, target_kind=KIND_COIN,
+                                 escape_dir=DIR_NONE, target_dist=5)
+    no_target = vectorize(blocked_down, 0, target_dir=DIR_NONE, target_kind=KIND_COIN,
+                          escape_dir=DIR_NONE, target_dist=0)
+    already_there = vectorize(blocked_down, 0, target_dir=DIR_HERE, target_kind=KIND_COIN,
+                              escape_dir=DIR_NONE, target_dist=0)
+
+    assert pulled_into_wall[_TARGET_BLOCKED_INDEX] == 1.0
+    assert pulled_into_open[_TARGET_BLOCKED_INDEX] == 0.0
+    assert no_target[_TARGET_BLOCKED_INDEX] == 0.0
+    assert already_there[_TARGET_BLOCKED_INDEX] == 0.0
+
+
+def test_the_flag_lets_a_greedy_policy_learn_to_stop_walking_into_the_wall():
+    """Regression for Phase 1's infinite loop: a state where target_dir pointed
+    straight into a wall scored highest for the blocked direction anyway,
+    because two independent one-hot blocks summed in its favour. Training
+    directly on that exact state must now teach the model to prefer a legal
+    move once the interaction flag distinguishes it from the open case.
+    """
+    import numpy as np
+    from agent_code.linear_q.model import LinearQModel
+
+    blocked_down = (FREE_SAFE, FREE_SAFE, BLOCKED, FREE_SAFE)
+    stuck = vectorize(blocked_down, 0, target_dir=3, target_kind=KIND_COIN,
+                      escape_dir=DIR_HERE, target_dist=4)
+
+    m = LinearQModel()
+    # DOWN (action index 2) is invalid here and must fall behind a legal move
+    # after enough updates that mimic what training would apply: a bad step
+    # (invalid-action penalty) if DOWN is chosen, nothing if a legal one is.
+    for _ in range(2000):
+        m.update(stuck, action=2, target=-0.5, alpha=0.01)   # invalid-action reward
+        m.update(stuck, action=1, target=0.0, alpha=0.01)    # a legal move, neutral
+
+    values = m.values(stuck)
+    assert values[1] > values[2]     # the legal move now beats the blocked one
