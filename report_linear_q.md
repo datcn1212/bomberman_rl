@@ -4,10 +4,11 @@ Working log for the agent in `agent_code/linear_q/`, following the same
 discipline as `report_tabular_q.md`: one entry per phase, what changed, what it
 measured, what was decided. Negative results are kept.
 
-**Where this stands.** One phase. The agent converges on Task 1 with a masking
-fix in place; the interaction-feature fix tried first did not work, and both
-attempts are recorded because the failure is the more useful half of the
-story.
+**Where this stands.** One phase. The masking fix stops the agent walking into
+walls (invalid_action_rate 0.0), but the update rule itself does not yet
+converge: constant alpha leaves the weights drifting indefinitely, so an
+eval score reports whichever snapshot of that drift a run happened to stop on.
+A decaying schedule is the open item, not the training budget.
 
 ---
 
@@ -66,6 +67,7 @@ identical defaults.
 |---|---|---|---|
 | 1a | interaction feature `target_blocked` | never activates; wrong diagnosis | **reverted** |
 | 1b | mask blocked directions before selection | invalid_action_rate 0.0 across 9 runs | **kept** |
+| 1c | does alpha=0.001 converge? 2000 -> 6000 episodes | weight_norm never settles; eval mean fell | **constant alpha rejected** |
 
 ---
 
@@ -169,6 +171,55 @@ measurable after 2000 episodes of real training is not weak evidence, it is
 evidence the change never engaged, and it earned direct inspection of the
 weight column before either being trusted or discarded.
 
+### 1.4 Constant alpha does not converge
+
+The per-seed spread at 2000 episodes (31.6-49.6) was flagged as possibly a
+budget problem. The training log itself already argued against that before any
+further run was needed: `weight_norm` and in-training coins both plateau by
+episode 500-1000 (coins at 50/50, `weight_norm` in a 21.5-24.3 band) and stay
+there through episode 2000 - the update process reads as settled on the metric
+that budget would fix.
+
+The same three seeds, same alpha, continued to 6000 episodes, tested that
+reading directly:
+
+| | 2000 episodes | 6000 episodes |
+|---|---|---|
+| eval score, per seed | 47.3, 31.6, 49.6 | **50.0, 4.3, 42.3** |
+| eval mean | 42.835 | **32.199** |
+| invalid_action_rate | 0.0 | 0.0 |
+
+Longer training did not converge toward a stable value - it moved every seed,
+in both directions, and the mean fell. Masking still holds (invalid_action_rate
+0.0 on all three), so this is not a return of Phase 1.1's bug.
+
+`weight_norm` tracked past episode 2000 explains why: it never settles, it
+keeps drifting inside roughly the same band (21.6-25.3) through episode 6000,
+on all three seeds, while in-training coins stay maxed at 50/50 throughout
+(one exception, seed 2 at episode ~3000, scored 4 coins for a single episode
+then recovered next check). A constant step size has no mechanism to damp
+that drift once near a optimum - each update is still full-sized - so the
+model does not converge to a point, it wanders inside a region of good
+policies indefinitely. In-training reward cannot see this, because it
+saturates at the 50-coin ceiling as soon as the region is reached; only the
+weight trajectory shows the wandering. Eval score on a fixed, different set of
+30 arenas is sensitive to *which point in that wander* happened to be saved,
+which is exactly why extending the same run moved every seed's score without
+any of them settling.
+
+This is the same failure tabular_q's own Phase 2 named for the tabular case -
+"the estimate never converges and the policy is decided by where the random
+walk sits when training stops" - reached independently here for a linear
+model under a literally identical root cause: a step size with no decay.
+
+**Decision:** `"constant"` alpha is rejected as the schedule to ship with.
+Nothing here says alpha=0.001 the *value* was wrong - training-time
+performance was excellent throughout - only that stopping at an arbitrary
+episode count under a non-decaying rate reports whichever snapshot the drift
+happened to land on, not a property of the model. A decaying schedule (the
+open question in Settings/Open below) is now the next thing to build, not
+another point on this sweep.
+
 ---
 
 ## Settings currently in force
@@ -188,18 +239,24 @@ budget: 2000 episodes on `coin-heaven`
 `target_blocked` interaction feature - structurally unreachable, reverted in
 favour of masking at decision time (1.1-1.2).
 
+`alpha_schedule "constant"` as a final choice - `weight_norm` never settles
+(1.4), so a run's eval score reports an arbitrary snapshot of an unconverged
+drift, not a stable policy. Still the default for lack of an alternative; see
+Open below.
+
 ## Open
 
-1. **Not yet converged at any tested alpha over 2000 episodes.** 0.001 is best
-   so far but its own per-seed spread (31.6 to 49.6) suggests it may not be
-   settled either; a longer budget or a decaying schedule has not been tried.
-2. **`alpha_schedule` has only `"constant"`.** What a visit-based or
-   feature-based decay should look like for a shared weight matrix is
-   unresolved, deferred until 0.001's convergence ceiling is known.
-3. **Task 2 and beyond are untested.** `allow_bomb` is still off; bomb-safety
+1. **No decaying `alpha_schedule` exists yet.** `"constant"` is confirmed not
+   to converge (1.4). Tabular_q's own visit-count decay has no direct
+   equivalent (a weight is shared across every state with an active feature,
+   not owned by one state), so the schedule needs its own design: candidates
+   are a global episode-based decay, or a per-feature visit count analogous to
+   tabular_q's but counted per active phi() component rather than per state.
+   This is the immediate next step, ahead of Task 2.
+2. **Task 2 and beyond are untested.** `allow_bomb` is still off; bomb-safety
    reward and the resulting risk of Q divergence (the deadly triad -
    bootstrapping, off-policy, function approximation, all three present here)
    have not been exercised yet.
-4. **No comparison to tabular_q on any shared protocol yet.** Everything here
+3. **No comparison to tabular_q on any shared protocol yet.** Everything here
    is Task 1 solo; the four-agent anchor tabular_q uses (Phase 26, 2.210) has
    no linear_q counterpart.
