@@ -4,11 +4,15 @@ Mirrors `tabular_q/config.py`'s convention: every knob lives here so an
 experiment is fully described by one JSON file, written by `tools/train.py` and
 pointed at through the LQ_CONFIG environment variable.
 
-`alpha_schedule` offers only "constant" for now. A tabular agent's visit-count
-decay is meaningless here - a weight is touched by every state that shares an
-active feature, not by one state alone - so what a correct schedule looks like
-is an open question, not a known one. Phase 1 answers it by first proving a
-constant rate converges at all, the same order tabular_q's own Phase 2 followed.
+`alpha_schedule` - Phase 1.4 (report_linear_q.md) measured "constant" directly:
+weight_norm never settles, only wanders inside a band, so an eval score reports
+whichever point of that drift a run happened to stop on. "visit" decays each
+*weight entry* w[i, a] by how many times (feature i, action a) specifically was
+updated - `LinearQModel.effective_alpha` - the same Robbins-Monro shape
+tabular_q validated (alpha / (1 + n/half_life)), counted at the grain that
+actually matches this representation: a weight is shared by every state with
+that feature active, not owned by one state, so the count has to be per weight
+entry rather than per state.
 """
 
 import json
@@ -19,8 +23,16 @@ from dataclasses import dataclass, fields
 @dataclass
 class Config:
     # --- learning -----------------------------------------------------
-    alpha: float = 0.01
-    alpha_schedule: str = "constant"
+    alpha: float = 0.001            # Phase 1.2 (report_linear_q.md)
+    alpha_schedule: str = "visit"   # Phase 2: "constant" never converges
+    # Counted per (feature, action) weight entry, not per state: see model.py's
+    # LinearQModel.effective_alpha. 1000 was swept against 10000 and 50000 on
+    # Task 1 and won outright (eval score 50.0/50.0/50.0, spread 0.000, against
+    # 49.0 and 49.6 for the larger values) - but it was only ever measured on
+    # Task 1's small, low-noise feature space. Re-sweep once Task 2 (bombs) is
+    # exercised: a schedule this aggressive could lock in a bomb-related weight
+    # before enough data has accumulated to trust it.
+    alpha_half_life: float = 1000.0
     gamma: float = 0.995
 
     # --- exploration ----------------------------------------------------

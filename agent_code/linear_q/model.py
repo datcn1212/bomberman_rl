@@ -224,6 +224,12 @@ class LinearQModel:
         self.feature_version = FEATURE_VERSION
         self.feature_flags = dict(feature_flags or {})
         self.w = np.zeros((PHI_DIM, N_ACTIONS), dtype=np.float64)
+        # How many times weight w[i, a] has actually been moved: a feature
+        # touches only the entries where phi[i] != 0, so this is counted per
+        # (feature, action) rather than per update call. Read by
+        # effective_alpha() under "visit"; always maintained, even under
+        # "constant", so switching schedules mid-experiment costs nothing.
+        self.visits = np.zeros((PHI_DIM, N_ACTIONS), dtype=np.int64)
 
     def values(self, phi):
         return phi @ self.w
@@ -235,9 +241,35 @@ class LinearQModel:
         entire point of function approximation and also the entire mechanism by
         which a bad step size or a bad feature scale can make Q diverge, since
         a single update now touches every state that shares a feature.
+
+        `alpha` may be a scalar or a (PHI_DIM,) array - effective_alpha()
+        decides which - and broadcasting handles either without this method
+        needing to know.
         """
         delta = target - float(phi @ self.w[:, action])
+        active = phi != 0
         self.w[:, action] += alpha * delta * phi
+        self.visits[active, action] += 1
+
+    def effective_alpha(self, phi, action, cfg):
+        """Step size for one update, one entry per active feature.
+
+        Mirrors tabular_q's per-(state, action) decay, alpha / (1 + n/half_life)
+        - the same Robbins-Monro shape, Phase 2 of that report - but counted at
+        the grain this representation actually has: a weight is shared by every
+        state with that feature active, not owned by one state, so n has to be
+        the number of times *this weight entry* has moved, not how many times a
+        state has been seen. Phase 1.4 measured what "constant" (n has no
+        effect) does instead: weight_norm never settles, only wanders inside a
+        band, so an eval score reports whichever point of that drift a run
+        happened to stop on.
+        """
+        if cfg.alpha_schedule == "constant":
+            return cfg.alpha
+        if cfg.alpha_schedule == "visit":
+            n = self.visits[:, action]
+            return cfg.alpha / (1.0 + n / cfg.alpha_half_life)
+        raise ValueError("unknown alpha_schedule %r" % cfg.alpha_schedule)
 
     def save(self, path):
         with open(path, "wb") as fh:

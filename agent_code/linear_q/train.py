@@ -156,7 +156,8 @@ def _flush(self):
     self.bombs_dropped += t.bombs
 
     target = t.reward if t.terminal else t.reward + self.cfg.gamma * _best_next(self, t.next_phi)
-    self.model.update(t.phi, t.action, target, self.cfg.alpha)
+    alpha = self.model.effective_alpha(t.phi, t.action, self.cfg)
+    self.model.update(t.phi, t.action, target, alpha)
 
 
 def game_events_occurred(self, old_game_state, self_action, new_game_state, events):

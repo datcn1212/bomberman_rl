@@ -4,11 +4,12 @@ Working log for the agent in `agent_code/linear_q/`, following the same
 discipline as `report_tabular_q.md`: one entry per phase, what changed, what it
 measured, what was decided. Negative results are kept.
 
-**Where this stands.** One phase. The masking fix stops the agent walking into
-walls (invalid_action_rate 0.0), but the update rule itself does not yet
-converge: constant alpha leaves the weights drifting indefinitely, so an
-eval score reports whichever snapshot of that drift a run happened to stop on.
-A decaying schedule is the open item, not the training budget.
+**Where this stands.** Two phases. The masking fix stops the agent walking
+into walls (invalid_action_rate 0.0 throughout). A per-(feature, action)
+decaying step size then fixed the non-convergence a constant rate left behind:
+50.0/50.0/50.0 on Task 1, spread 0.000, against constant alpha's 45.7-point
+spread on the same protocol. That value is validated on Task 1 only - Task 2
+(bombs) is the next open question, not a settled one.
 
 ---
 
@@ -68,6 +69,7 @@ identical defaults.
 | 1a | interaction feature `target_blocked` | never activates; wrong diagnosis | **reverted** |
 | 1b | mask blocked directions before selection | invalid_action_rate 0.0 across 9 runs | **kept** |
 | 1c | does alpha=0.001 converge? 2000 -> 6000 episodes | weight_norm never settles; eval mean fell | **constant alpha rejected** |
+| 2 | `alpha_schedule="visit"`, per-(feature,action) decay, half_life sweep | 1000: 50.0/50.0/50.0, spread 0.000 | **kept, new default** |
 
 ---
 
@@ -222,16 +224,101 @@ another point on this sweep.
 
 ---
 
+## Phase 2 - a decaying alpha schedule
+
+### 2.1 Design
+
+Tabular_q's own fix for the identical symptom (Phase 2 of that report) decays
+step size by how many times a **state** has been visited:
+`alpha / (1 + n(state, action) / half_life)`. That count has no direct
+equivalent here - a weight `w[i, a]` is shared by every state with feature `i`
+active, not owned by one state - so the same formula is applied at the grain
+this representation actually has: `n` counts how many times **weight entry**
+`w[i, a]` itself has moved, incremented in `LinearQModel.update` whenever
+`phi[i] != 0` for the action being updated. Common features (a neighbour being
+free, the bias term) accumulate a large `n` quickly and their columns settle;
+rare ones keep a near-full step size for longer. A global, episode-indexed
+decay was the other candidate raised when this was opened; it was not built,
+because it would shrink every weight at the same rate regardless of how often
+that specific weight is actually touched, the opposite of what a shared,
+unevenly-visited weight matrix needs.
+
+`effective_alpha(phi, action, cfg)` returns either the untouched scalar
+(`"constant"`) or a `(PHI_DIM,)` array (`"visit"`); `update()`'s existing
+`alpha * delta * phi` line needed no change, since numpy broadcasts a
+per-entry array the same way it broadcasts a scalar.
+
+**Verified before any training:** `"constant"` reproduces the exact table it
+did before this change. Two seeds trained on identical configs (pre- and
+post-change code, `alpha_schedule="constant"`), weight matrices compared entry
+by entry - `max|diff| = 0` on both. 9 new unit tests, including the one
+argument the design rests on: two features touched 200 and 2 times
+respectively, under identical starting conditions, end up with different step
+sizes - a global episode-based decay could not produce that.
+
+### 2.2 What scale `half_life` needs to be at
+
+Tabular_q's `half_life=1000` is calibrated for a **state** visit count. A
+2000-episode probe run measured what a **weight-entry** count actually reaches
+here: some (feature, action) entries pass 250,000 by episode 2000, two to three
+orders of magnitude past what a single tabular state accumulates over an entire
+budget, because one feature is shared by every state that has it active rather
+than owned by one. Reusing `half_life=1000` unchanged would have been a guess
+carried over from a different unit, not a measurement - it would crush the
+common features' step size within the first few hundred episodes.
+
+### 2.3 Half-life sweep
+
+Same protocol as 1.4 (6000 episodes, 3 seeds, `coin-heaven`,
+`allow_bomb: false`), so the result is directly comparable to constant alpha's
+non-convergence:
+
+| half_life | eval score, per seed | mean | spread | invalid_action_rate |
+|---|---|---|---|---|
+| constant (1.4, for reference) | 50.0, 4.3, 42.3 | 32.199 | 45.723 | 0.0 |
+| 1000 | 50.0, 50.0, 50.0 | **50.000** | **0.000** | 0.0 |
+| 10000 | 48.9, 49.3, 48.9 | 49.017 | 0.390 | 0.0 |
+| 50000 | 49.5, 49.6, 49.7 | 49.600 | 0.245 | 0.0 |
+
+All three collapse the 45.7-point spread constant alpha left to under 0.4, and
+`half_life=1000` reaches the maximum score on every seed with zero spread. That
+exactness was checked rather than assumed: `mean_steps` is not just similar but
+bit-identical across the three independently-trained seeds (124.193 on all
+three), on a fixed external evaluation set - three separately trained models
+converging to indistinguishable behaviour on boards none of them trained on,
+which reads as genuine convergence to a shared near-optimal policy rather than
+three lucky coincidences.
+
+**Decision:** `alpha_schedule="visit"`, `alpha_half_life=1000` - both promoted
+to the `config.py` default, together with `alpha=0.001` (Phase 1.2's finding,
+which had never actually been written into the default before now). Mirrors
+tabular_q's own history exactly: `"visit"` only became *its* default once
+Phase 2 measured that it was needed.
+
+**Caveat that has to travel with this number.** 1000 was swept on Task 1 alone
+- no crates, no opponents, `allow_bomb` off, a small and low-noise feature
+distribution. A schedule this aggressive settles common features within the
+first few hundred episodes; whether that is still safe once Task 2 exercises
+bomb-related features, which start rare and stay rare until the policy learns
+to use them, is untested. A feature that locks in early on too little bomb data
+could freeze onto a bad estimate before it has been visited enough to trust.
+Re-sweep `half_life` once Task 2 is exercised rather than carrying this value
+forward unexamined.
+
+---
+
 ## Settings currently in force
 
 ```
-alpha 0.001, alpha_schedule "constant"
+alpha 0.001, alpha_schedule "visit", alpha_half_life 1000
 gamma 0.995
 exploration "epsilon", eps 1.0 -> 0.05 over 2000 episodes
 use_symmetry True, use_opponent_blocking True
 allow_bomb False (Task 1 scope only)
 rewards: identical to tabular_q's defaults at the point this branch forked
-budget: 2000 episodes on `coin-heaven`
+budget: 6000 episodes on `coin-heaven` (2000 was Phase 1's; 1.4/2.3 showed a
+        constant rate needed the longer budget just to reveal it does not
+        converge - the decaying schedule reaches its result well inside it)
 ```
 
 ## Rejected, with evidence
@@ -241,18 +328,21 @@ favour of masking at decision time (1.1-1.2).
 
 `alpha_schedule "constant"` as a final choice - `weight_norm` never settles
 (1.4), so a run's eval score reports an arbitrary snapshot of an unconverged
-drift, not a stable policy. Still the default for lack of an alternative; see
-Open below.
+drift, not a stable policy. Superseded by `"visit"` (2.1-2.3).
+
+A global, episode-indexed decay (alternative design for Phase 2) - not built.
+It would shrink every weight at the same rate regardless of how often that
+specific weight is touched, which is the wrong axis for a matrix where some
+entries are updated hundreds of thousands of times more than others (2.2).
 
 ## Open
 
-1. **No decaying `alpha_schedule` exists yet.** `"constant"` is confirmed not
-   to converge (1.4). Tabular_q's own visit-count decay has no direct
-   equivalent (a weight is shared across every state with an active feature,
-   not owned by one state), so the schedule needs its own design: candidates
-   are a global episode-based decay, or a per-feature visit count analogous to
-   tabular_q's but counted per active phi() component rather than per state.
-   This is the immediate next step, ahead of Task 2.
+1. **`half_life=1000` is untested past Task 1.** It was swept on a small,
+   low-noise feature distribution (2.3) and settles common features within a
+   few hundred episodes; whether that is still safe once bomb-related features
+   - rare until the policy learns to use them - are exercised is the open
+   question, not assumed either way. Re-sweep once Task 2 is running, not
+   before.
 2. **Task 2 and beyond are untested.** `allow_bomb` is still off; bomb-safety
    reward and the resulting risk of Q divergence (the deadly triad -
    bootstrapping, off-policy, function approximation, all three present here)
@@ -260,3 +350,7 @@ Open below.
 3. **No comparison to tabular_q on any shared protocol yet.** Everything here
    is Task 1 solo; the four-agent anchor tabular_q uses (Phase 26, 2.210) has
    no linear_q counterpart.
+4. **`tools/verify_unchanged.py` is still hardcoded to `tabular_q`.** Phase
+   2.1's pre/post-change comparison was done with a one-off script instead,
+   because this tool cannot target `linear_q` yet - the same gap `train.py`
+   and `eval_existing.py` had before Phase 1, not yet closed here.

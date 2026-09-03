@@ -128,3 +128,99 @@ def test_a_blocked_direction_is_never_chosen_even_when_its_q_value_is_highest():
 
     action = cb.act(self, game_state)
     assert action != "DOWN"
+
+
+# --- alpha_schedule "visit" (Phase 2) ---------------------------------------
+
+def _cfg(schedule, alpha=0.1, half_life=10.0):
+    import types
+    return types.SimpleNamespace(alpha=alpha, alpha_schedule=schedule,
+                                 alpha_half_life=half_life)
+
+
+def test_constant_schedule_ignores_visits_entirely():
+    """Regression: switching schedules must never change "constant"'s
+    behaviour, since that is still the default and Phase 1's results depend on
+    it being untouched."""
+    m = LinearQModel()
+    phi = np.ones(PHI_DIM)
+    cfg = _cfg("constant", alpha=0.05)
+    for _ in range(50):
+        alpha = m.effective_alpha(phi, action=0, cfg=cfg)
+        assert alpha == 0.05
+        m.update(phi, action=0, target=1.0, alpha=alpha)
+
+
+def test_visit_schedule_starts_at_the_full_rate():
+    m = LinearQModel()
+    phi = np.ones(PHI_DIM)
+    cfg = _cfg("visit", alpha=0.1, half_life=10.0)
+    alpha = m.effective_alpha(phi, action=0, cfg=cfg)
+    assert np.allclose(alpha, 0.1)   # no visits yet: n=0, alpha/(1+0)=alpha
+
+
+def test_visit_schedule_decays_by_the_robbins_monro_formula():
+    m = LinearQModel()
+    phi = np.zeros(PHI_DIM); phi[5] = 1.0
+    cfg = _cfg("visit", alpha=0.1, half_life=10.0)
+    for _ in range(10):
+        alpha = m.effective_alpha(phi, action=2, cfg=cfg)
+        m.update(phi, action=2, target=1.0, alpha=alpha)
+    # After 10 updates at half_life=10, n=10 for the active entry.
+    alpha = m.effective_alpha(phi, action=2, cfg=cfg)
+    assert alpha[5] == pytest.approx(0.1 / (1.0 + 10 / 10.0))
+
+
+def test_only_active_features_accumulate_visits():
+    m = LinearQModel()
+    phi = np.zeros(PHI_DIM); phi[3] = 1.0   # index 7 stays at 0.0
+    m.update(phi, action=0, target=1.0, alpha=0.1)
+    assert m.visits[3, 0] == 1
+    assert m.visits[7, 0] == 0
+
+
+def test_visits_are_tracked_per_action_column_independently():
+    m = LinearQModel()
+    phi = np.zeros(PHI_DIM); phi[3] = 1.0
+    m.update(phi, action=0, target=1.0, alpha=0.1)
+    assert m.visits[3, 0] == 1
+    assert m.visits[3, 1] == 0    # a different action's column is untouched
+
+
+def test_a_frequently_touched_feature_decays_faster_than_a_rare_one():
+    """The entire point of the design: two features that start at the same
+    rate must end up with different step sizes once one has been updated far
+    more than the other - a global episode-based decay could not do this."""
+    m = LinearQModel()
+    cfg = _cfg("visit", alpha=0.1, half_life=10.0)
+
+    common = np.zeros(PHI_DIM); common[0] = 1.0
+    rare = np.zeros(PHI_DIM); rare[1] = 1.0
+
+    for _ in range(200):
+        alpha = m.effective_alpha(common, action=0, cfg=cfg)
+        m.update(common, action=0, target=1.0, alpha=alpha)
+    for _ in range(2):
+        alpha = m.effective_alpha(rare, action=0, cfg=cfg)
+        m.update(rare, action=0, target=1.0, alpha=alpha)
+
+    alpha_common = m.effective_alpha(common, action=0, cfg=cfg)[0]
+    alpha_rare = m.effective_alpha(rare, action=0, cfg=cfg)[1]
+    assert alpha_common < alpha_rare
+
+
+def test_visits_survive_save_load():
+    m = LinearQModel()
+    phi = np.ones(PHI_DIM)
+    m.update(phi, action=0, target=1.0, alpha=0.1)
+    with tempfile.NamedTemporaryFile(suffix=".pkl") as f:
+        m.save(f.name)
+        loaded = LinearQModel.load(f.name)
+    assert np.array_equal(loaded.visits, m.visits)
+
+
+def test_unknown_schedule_name_is_rejected():
+    m = LinearQModel()
+    cfg = _cfg("nonsense")
+    with pytest.raises(ValueError):
+        m.effective_alpha(np.ones(PHI_DIM), action=0, cfg=cfg)
