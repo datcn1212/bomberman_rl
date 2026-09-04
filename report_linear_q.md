@@ -6,12 +6,14 @@ measured, what was decided. Negative results are kept.
 
 **Where this stands.** Task 1 (coin-heaven, no bombs) is solved: masking plus
 a per-(feature, action) decaying step size converge every seed to score 50.0.
-Task 2 (loot-crate, bombs on) does not yet work: masking `BOMB` on cooldown
-carried over cleanly, but 60% of trained seeds collapse to a degenerate
-policy - bomb once, then do almost nothing - confirmed systematic on ten
-seeds, not a hyperparameter artifact (re-sweeping `half_life` moves which seed
-fails rather than fixing any of them). What separates the 40% that escape it
-from the 60% that do not is the open question.
+Task 2 (loot-crate, bombs on) is partway there. A baseline collapsed
+systematically - 60% of seeds learned to bomb once and then do almost nothing,
+confirmed on ten seeds and immune to re-sweeping the step-size schedule, which
+only moved which seed failed. Potential-based shaping toward escaping danger,
+one weight value tested, removed the collapse entirely (0/10 seeds at
+`coins=0.000`, was 6/10) and roughly halved the average suicide rate (86.4% ->
+44.3%) - still well above tabular_q's eventual 3.0% on the same scenario, so
+this is progress, not a solved Task 2.
 
 ---
 
@@ -75,6 +77,7 @@ identical defaults.
 | 3a | mask BOMB while on cooldown (`bombs_left`) | proactive, before Task 2 exercised it | **kept** |
 | 3b | Task 2 baseline: `loot-crate`, `allow_bomb: true`, half_life=1000, 10 seeds | 60% of seeds collapse to ~1 bomb then idle, coins exactly 0.000 | **open problem** |
 | 3c | half_life resweep (10000, 50000) on the collapsing seeds | rescues some, breaks others that were fine; no value fixes all three | **not a half_life problem** |
+| 4 | potential-based shaping toward escaping danger, weight=0.2, same 10 seeds | 0/10 seeds collapse (was 6/10); mean suicide 0.864 -> 0.443 | **kept** |
 
 ---
 
@@ -433,6 +436,100 @@ answer, not "which half_life."
 
 ---
 
+## Phase 4 - potential-based shaping toward escaping danger
+
+### 4.1 Design
+
+Phase 3's diagnosis was specific: escape-success experience is rare (1 of
+2000 early episodes), so the only signal against dying is the terminal -5,
+propagated back through gamma across however many steps preceded it. A dense,
+per-step signal for the same objective is exactly what potential-based
+shaping is for, and `_potential()` already exists (Phase 1, for the target).
+
+Added as a second, independent potential summed into the same function:
+`Phi(s) = -shaping_weight * target_distance - escape_shaping_weight *
+danger_urgency`. Ng et al.'s policy-invariance guarantee holds for any
+`Phi(s)`, and a sum of two valid potentials is itself a valid potential, so
+the target term needed no change and both call sites (mid-episode and
+terminal) needed none either - `_potential()` already gets called in exactly
+the two places Phase 1 established.
+
+`danger_urgency` reuses `t_here`, an existing feature, rather than computing
+anything new: `t_here` is 0 when the current tile never becomes lethal and
+1-4 counting down to detonation, so a *smaller* nonzero `t_here` is worse -
+the opposite polarity of `target_dist`. Remapped to `0 if t_here==0 else
+(5 - t_here)` so the sign convention matches the target term throughout: a
+larger potential is always better.
+
+**Verified before training:** 7 unit tests pin the urgency mapping, the
+independence of the two terms, and the magnitude of the shaping reward for the
+exact scenario Phase 3 diagnosed (t_here 1 -> 0 gives a clear positive
+reward, not a rounding-sized nudge). `escape_shaping_weight` defaults to 0.0;
+an A/B on real training (two seeds, pre- and post-change code, default
+config) gave `max|w diff| = 0` - the addition is inert until turned on.
+
+Hand-computing the shaping reward at `weight=0.5` for a one-step escape gave
++2.0 - larger than `reward_coin` (1.0) and comparable to a large fraction of
+`reward_killed_self` (-5.0). Too strong a value to guess; the weight needed
+measuring, not assuming.
+
+### 4.2 Cheap check first, on a seed that was already fine
+
+2000 episodes, 1 seed, `escape_shaping_weight=0.2`: training-time suicide
+99.15% against the no-shaping baseline's 99.95% - barely different, and by
+itself uninformative, since Phase 3.3 already showed 2000 episodes is not
+enough to see an effect either way.
+
+Extended to 6000 episodes on the same seed, matching Phase 3.3's exact
+comparison point:
+
+| | no shaping (3.3) | escape_shaping_weight=0.2 |
+|---|---|---|
+| suicide | 68.0% | **45.3%** |
+| coins | 1.653 | 1.447 |
+| steps | 145.6 | **230.7** |
+| bombs | 17.0 | 32.0 |
+
+Suicide fell substantially and survival time grew by more than half. But this
+seed was already in the *productive* cluster without shaping (Phase 3.5) - it
+does not yet answer whether shaping rescues the 60% that collapsed to
+`coins=0.000`, which is the actual question.
+
+### 4.3 The same ten seeds Phase 3.5 measured
+
+`escape_shaping_weight=0.2`, otherwise identical protocol (`loot-crate`, 6000
+episodes, `half_life=1000`), the same ten training seeds that gave the 60%
+collapse:
+
+| | no shaping (3.5) | shaping, weight=0.2 |
+|---|---|---|
+| seeds with `coins = 0.000` | **6 / 10** | **0 / 10** |
+| mean suicide rate | 0.864 | **0.443** |
+| coins, collapsed cluster | 0.000 | n/a - no cluster |
+| coins, range across all 10 | 0.000 or 1.47-1.50 | **1.14 - 1.55** |
+
+Every seed that previously collapsed - 2, 5, 7, 8, 9, 10 - now lands in the
+same band as the seeds that were already productive: `coins` 1.14-1.55 across
+all ten, spread 0.402, no seed at zero. `invalid_action_rate` is 0.0 on all
+ten (masking integrity unaffected).
+
+One seed is a partial outlier worth naming rather than averaging away: seed 5
+reaches the *highest* coin and crate count of all ten (1.545, 10.69) while
+suiciding far more than the rest (0.795 against 0.38-0.45) and dropping far
+fewer bombs (7.8 against 30-36) - a bomb-scarce, high-value-per-bomb, higher-risk
+profile, not simply "worse". Whether that is a seed still finding its footing
+or a genuinely different strategy this weight permits is not resolved here.
+
+**Decision:** `escape_shaping_weight=0.2` kept, not yet promoted to the
+`config.py` default - one weight value has been tested, not swept. Suicide at
+44.3% mean is a large improvement over 86.4% but still far from tabular_q's
+eventual `loot-crate` result (suicide 0.030, Phase 3 of that report); whether a
+different weight closes more of that gap, or whether 6000 episodes is again
+the binding constraint the way it was in Phase 3, is the next question, not
+assumed either way.
+
+---
+
 ## Settings currently in force
 
 ```
@@ -441,6 +538,8 @@ gamma 0.995
 exploration "epsilon", eps 1.0 -> 0.05 over 2000 episodes
 use_symmetry True, use_opponent_blocking True
 allow_bomb True (Task 2, Phase 3)
+shaping_weight 0.0, escape_shaping_weight 0.2 (Phase 4; not yet a config
+        default - one value tested, not swept)
 rewards: identical to tabular_q's defaults at the point this branch forked
 budget: 6000 episodes; Task 1 on `coin-heaven`, Task 2 on `loot-crate`
 ```
@@ -465,23 +564,21 @@ seed passive or broken. The failure follows the seed, not the schedule value.
 
 ## Open
 
-1. **60% of Task 2 training runs collapse to a degenerate local optimum**
-   (3.5): bomb approximately once, then do almost nothing for the rest of the
-   episode - `mean_coins` exactly 0.000 on six of ten seeds, `1.47-1.50` on the
-   other four, nothing in between. This is the central open problem, confirmed
-   systematic rather than a small-sample accident. What distinguishes the four
-   escaping seeds from the six that do not is unknown - candidates raised but
-   not yet tested: `reward_survived` (currently 0.0, so the only signal against
-   dying is the terminal -5, propagated back through gamma rather than given
-   directly); potential-based shaping toward the escape route, which does not
-   exist yet (only the target-pursuit potential does); or accepting the
-   instability and selecting among trained seeds at ship time, the way
-   tabular_q's and SARSA's `select_final`-style tooling already does.
-2. **No comparison to tabular_q on any shared protocol yet.** Task 1's own
+1. **`escape_shaping_weight=0.2` fixed the collapse but not the suicide rate.**
+   0/10 seeds at `coins=0.000` (was 6/10), but mean suicide is still 44.3%
+   against tabular_q's eventual 3.0% on the same scenario (4.3). Untested:
+   whether a different weight does better, whether 6000 episodes remains the
+   binding constraint the way it was before shaping, and whether
+   `reward_survived` (still 0.0) adds anything on top of shaping rather than
+   being redundant with it.
+2. **Seed 5's profile is unexplained.** Highest coins and crates of all ten,
+   far fewer bombs, and the highest suicide rate by a wide margin (4.3) - a
+   different strategy or an unsettled outlier, not distinguished yet.
+3. **No comparison to tabular_q on any shared protocol yet.** Task 1's own
    comparison point (Phase 26, 2.210 on the four-agent board) has no linear_q
    counterpart, and Task 2 is not yet at a state worth comparing.
-3. **`tools/verify_unchanged.py` is still hardcoded to `tabular_q`.** Every
-   pre/post-change comparison on this branch (Phase 2.1) has used a one-off
-   script instead, because this tool cannot target `linear_q` yet - the same
-   gap `train.py` and `eval_existing.py` had before Phase 1, not yet closed
-   here.
+4. **`tools/verify_unchanged.py` is still hardcoded to `tabular_q`.** Every
+   pre/post-change comparison on this branch (Phases 2.1, 4.1) has used a
+   one-off script instead, because this tool cannot target `linear_q` yet -
+   the same gap `train.py` and `eval_existing.py` had before Phase 1, not yet
+   closed here.
