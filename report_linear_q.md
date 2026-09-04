@@ -4,12 +4,14 @@ Working log for the agent in `agent_code/linear_q/`, following the same
 discipline as `report_tabular_q.md`: one entry per phase, what changed, what it
 measured, what was decided. Negative results are kept.
 
-**Where this stands.** Two phases. The masking fix stops the agent walking
-into walls (invalid_action_rate 0.0 throughout). A per-(feature, action)
-decaying step size then fixed the non-convergence a constant rate left behind:
-50.0/50.0/50.0 on Task 1, spread 0.000, against constant alpha's 45.7-point
-spread on the same protocol. That value is validated on Task 1 only - Task 2
-(bombs) is the next open question, not a settled one.
+**Where this stands.** Task 1 (coin-heaven, no bombs) is solved: masking plus
+a per-(feature, action) decaying step size converge every seed to score 50.0.
+Task 2 (loot-crate, bombs on) does not yet work: masking `BOMB` on cooldown
+carried over cleanly, but 60% of trained seeds collapse to a degenerate
+policy - bomb once, then do almost nothing - confirmed systematic on ten
+seeds, not a hyperparameter artifact (re-sweeping `half_life` moves which seed
+fails rather than fixing any of them). What separates the 40% that escape it
+from the 60% that do not is the open question.
 
 ---
 
@@ -70,6 +72,9 @@ identical defaults.
 | 1b | mask blocked directions before selection | invalid_action_rate 0.0 across 9 runs | **kept** |
 | 1c | does alpha=0.001 converge? 2000 -> 6000 episodes | weight_norm never settles; eval mean fell | **constant alpha rejected** |
 | 2 | `alpha_schedule="visit"`, per-(feature,action) decay, half_life sweep | 1000: 50.0/50.0/50.0, spread 0.000 | **kept, new default** |
+| 3a | mask BOMB while on cooldown (`bombs_left`) | proactive, before Task 2 exercised it | **kept** |
+| 3b | Task 2 baseline: `loot-crate`, `allow_bomb: true`, half_life=1000, 10 seeds | 60% of seeds collapse to ~1 bomb then idle, coins exactly 0.000 | **open problem** |
+| 3c | half_life resweep (10000, 50000) on the collapsing seeds | rescues some, breaks others that were fine; no value fixes all three | **not a half_life problem** |
 
 ---
 
@@ -307,6 +312,127 @@ forward unexamined.
 
 ---
 
+## Phase 3 - Task 2: bombs, and a systematic collapse
+
+### 3.1 Masking `BOMB` on cooldown, before it was needed
+
+Phase 1 masked movement into a wall because phi() has no component that
+guarantees a blocked direction scores lowest. `bombs_left` (whether the agent
+currently has a bomb available) has exactly the same property - phi() encodes
+no bomb-availability feature at all - so `Q(BOMB)` ranking highest while on
+cooldown is exactly as unguaranteed as `Q(blocked direction)` was, and would
+reproduce the same trap. Fixed in `callbacks.act` before any Task 2 training
+ran, rather than waiting to rediscover it: `BOMB` is now excluded from the
+candidate set whenever `game_state["self"][2]` is false, the same mechanism as
+the wall mask, checked every step. 3 new unit tests; the existing
+`allow_bomb: false` path is unaffected by construction (the new check is only
+ever reached when `BOMB` is already in `self.legal`).
+
+### 3.2 First probe: 99.95% suicide, and why
+
+`loot-crate`, `allow_bomb: true`, otherwise Phase 2's settings unchanged, 1
+seed, 2000 episodes (matching the cheap-probe-first discipline). Training
+places a bomb in every single episode and dies in 1999 of 2000 (average 16.8
+steps per episode). Fully greedy evaluation afterward is the opposite extreme:
+0 bombs, 0 coins, 0 suicide, 400/400 steps - having died from every bomb it
+ever placed during training, the model learned `Q(BOMB)` low enough that it
+never bombs at all once exploration is turned off.
+
+Investigated directly rather than assumed:
+
+- `escape_search()` computes correctly. A hand-built state (agent standing on
+  a bomb with a 3-step fuse, open board) returns a real escape direction, and
+  `lethal_at` correctly marks steps 3-4 as the danger window.
+- The trained model does not use it. Querying the same state's Q-values
+  directly: the correct escape direction is UP, the model's greedy choice is
+  LEFT, and the six Q-values are small and close together (0.008-0.148) -
+  undertrained, not confidently wrong.
+- Only 1 of 2000 training episodes ever survived a bombing. With almost no
+  genuine escape-success experience to reinforce, there is essentially nothing
+  for the escape-direction weights to learn from.
+
+### 3.3 More episodes helps - for some seeds
+
+Same protocol, 6000 episodes instead of 2000, 1 seed first (cheap check):
+suicide fell from 99.95% (training-time) to 68.0% (eval), coins rose from 0 to
+1.653, crates from ~2.7 to 10.18, `weight_norm` grew smoothly with no
+divergence (0.01 to 3.57). The rare-experience hypothesis held up under a
+direct test.
+
+Confirmed on the full 3-seed protocol (`lq_p3_6000`) - and immediately
+complicated:
+
+| seed | suicide | coins | bombs | crates |
+|---|---|---|---|---|
+| 1 | 0.715 | 1.472 | 16.08 | 10.33 |
+| **2** | **0.985** | **0.000** | 0.98 | 2.52 |
+| 3 | 0.690 | 1.467 | 17.94 | 8.88 |
+
+Seed 2 never escaped the pattern 3.2 found for the single probe seed: its
+training log shows `killed_self=1` on essentially every one of the 6000
+episodes, bombing exactly once and dying, from episode 1 through episode 6000,
+while `weight_norm` still grows smoothly throughout (3.358 by the end) - the
+weights are moving, but the policy is not. `invalid_action_rate` is 0.0 on all
+three seeds, so this is not a return of 3.1 or Phase 1's masking gaps.
+
+### 3.4 Re-sweeping half_life does not fix it - the failure moves
+
+The caveat flagged at the end of Phase 2 (2.3) was exactly this: `half_life`
+was only ever measured on Task 1's low-noise distribution, and an aggressive
+schedule could freeze a rare, bomb-related weight before enough data exists to
+trust it. Re-swept on the same three seeds, same protocol:
+
+| half_life | seed 1 | seed 2 | seed 3 |
+|---|---|---|---|
+| | suicide / coins | suicide / coins | suicide / coins |
+| 1000 | 0.715 / 1.47 | **0.985 / 0.00** | 0.690 / 1.47 |
+| 10000 | 0.020 / 0.79 | 0.005 / 0.02 | **1.000 / 0.00** |
+| 50000 | **0.702 / 0.99** | 0.015 / 0.86 | 0.005 / 0.02 |
+
+No value rescues all three. Each one rescues whichever seed was failing at a
+different value while breaking (or leaving passive) one that had been fine.
+The two "rescued" seeds at 10000/50000 are not simply safer - they are close
+to inert (crates 0.23, essentially one bomb and then idle for the rest of the
+episode), which is a different flavour of the same underlying problem, not a
+solution to it. This is evidence against "half_life was miscalibrated" as the
+explanation: the failure follows the seed, not the parameter.
+
+One coincidence surfaced and was checked before being trusted, per the house
+rule this project has followed since Phase 1: `lq_p3_hl10000` seed 2 and
+`lq_p3_hl50000` seed 3 produced numerically near-identical eval statistics.
+Loading both models and comparing weights directly: `max|w diff| = 0.649` -
+genuinely different models, not a duplicate run. Both happen to have converged
+to the same qualitative class of policy (bomb once, then sit almost idle for
+the rest of the episode) on the same fixed 30 evaluation arenas, which is
+enough on its own to produce near-identical aggregate statistics from
+different weights. Not a bug; recorded because the identical-numbers reflex
+from Phase 1 says to check before moving on, not because it changed anything.
+
+### 3.5 Ten seeds: this is systematic, not a small-sample accident
+
+Three seeds could not distinguish "one unlucky draw" from "this fails most of
+the time." Seven more seeds at `half_life=1000` (the current default),
+identical protocol, combined with the three already run:
+
+| | fraction | suicide | coins | bombs | crates |
+|---|---|---|---|---|---|
+| productive | 4/10 | 0.746 | 1.480 | 14.44 | 10.16 |
+| collapsed | **6/10** | 0.942 | **0.000** | 0.98 | 2.75 |
+
+The split is exact, not approximate: every collapsed seed's `mean_coins` is
+`0.000` to three decimals, every productive seed's is `1.47-1.50` - two
+distinct outcomes, nothing in between, across ten independently trained
+models. **60% of training runs land in a degenerate local optimum**: bomb
+approximately once, then do almost nothing for the rest of the episode. Seed 2
+was not unlucky; it was the typical case.
+
+This is now a confirmed, systematic finding rather than a hyperparameter
+question. What produces the bimodal split - and what specifically distinguishes
+the four seeds that escape it - is the open question the next phase has to
+answer, not "which half_life."
+
+---
+
 ## Settings currently in force
 
 ```
@@ -314,11 +440,9 @@ alpha 0.001, alpha_schedule "visit", alpha_half_life 1000
 gamma 0.995
 exploration "epsilon", eps 1.0 -> 0.05 over 2000 episodes
 use_symmetry True, use_opponent_blocking True
-allow_bomb False (Task 1 scope only)
+allow_bomb True (Task 2, Phase 3)
 rewards: identical to tabular_q's defaults at the point this branch forked
-budget: 6000 episodes on `coin-heaven` (2000 was Phase 1's; 1.4/2.3 showed a
-        constant rate needed the longer budget just to reveal it does not
-        converge - the decaying schedule reaches its result well inside it)
+budget: 6000 episodes; Task 1 on `coin-heaven`, Task 2 on `loot-crate`
 ```
 
 ## Rejected, with evidence
@@ -335,22 +459,29 @@ It would shrink every weight at the same rate regardless of how often that
 specific weight is touched, which is the wrong axis for a matrix where some
 entries are updated hundreds of thousands of times more than others (2.2).
 
+`half_life` re-sweeping as *the* fix for Task 2's collapse (3.4) - 10000 and
+50000 each rescue a different seed than 1000 does while leaving another
+seed passive or broken. The failure follows the seed, not the schedule value.
+
 ## Open
 
-1. **`half_life=1000` is untested past Task 1.** It was swept on a small,
-   low-noise feature distribution (2.3) and settles common features within a
-   few hundred episodes; whether that is still safe once bomb-related features
-   - rare until the policy learns to use them - are exercised is the open
-   question, not assumed either way. Re-sweep once Task 2 is running, not
-   before.
-2. **Task 2 and beyond are untested.** `allow_bomb` is still off; bomb-safety
-   reward and the resulting risk of Q divergence (the deadly triad -
-   bootstrapping, off-policy, function approximation, all three present here)
-   have not been exercised yet.
-3. **No comparison to tabular_q on any shared protocol yet.** Everything here
-   is Task 1 solo; the four-agent anchor tabular_q uses (Phase 26, 2.210) has
-   no linear_q counterpart.
-4. **`tools/verify_unchanged.py` is still hardcoded to `tabular_q`.** Phase
-   2.1's pre/post-change comparison was done with a one-off script instead,
-   because this tool cannot target `linear_q` yet - the same gap `train.py`
-   and `eval_existing.py` had before Phase 1, not yet closed here.
+1. **60% of Task 2 training runs collapse to a degenerate local optimum**
+   (3.5): bomb approximately once, then do almost nothing for the rest of the
+   episode - `mean_coins` exactly 0.000 on six of ten seeds, `1.47-1.50` on the
+   other four, nothing in between. This is the central open problem, confirmed
+   systematic rather than a small-sample accident. What distinguishes the four
+   escaping seeds from the six that do not is unknown - candidates raised but
+   not yet tested: `reward_survived` (currently 0.0, so the only signal against
+   dying is the terminal -5, propagated back through gamma rather than given
+   directly); potential-based shaping toward the escape route, which does not
+   exist yet (only the target-pursuit potential does); or accepting the
+   instability and selecting among trained seeds at ship time, the way
+   tabular_q's and SARSA's `select_final`-style tooling already does.
+2. **No comparison to tabular_q on any shared protocol yet.** Task 1's own
+   comparison point (Phase 26, 2.210 on the four-agent board) has no linear_q
+   counterpart, and Task 2 is not yet at a state worth comparing.
+3. **`tools/verify_unchanged.py` is still hardcoded to `tabular_q`.** Every
+   pre/post-change comparison on this branch (Phase 2.1) has used a one-off
+   script instead, because this tool cannot target `linear_q` yet - the same
+   gap `train.py` and `eval_existing.py` had before Phase 1, not yet closed
+   here.
