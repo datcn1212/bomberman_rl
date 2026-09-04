@@ -67,6 +67,10 @@ class Config:
 
     shaping_weight: float = 0.0
     shaping_distance_cap: int = 15
+    # Phase 4 (report_linear_q.md): a second, independent potential toward
+    # safety, on top of the existing one toward the target. Off by default,
+    # tested in isolation before ever being combined with shaping_weight > 0.
+    escape_shaping_weight: float = 0.0
 
     # --- run plumbing -----------------------------------------------------
     n_episodes: int = 6000

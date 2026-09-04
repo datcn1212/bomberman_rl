@@ -57,18 +57,42 @@ def setup_training(self):
 
 
 def _potential(self, obs):
-    """Phi(s) = -w * distance to the nearest target.
+    """Phi(s) = -w_target * distance to the nearest target
+              - w_escape * danger urgency at the current tile.
 
-    Capped so that "no target reachable" and "target very far" are the same
-    value; an unbounded potential would make the shaping term jump whenever the
-    last coin on a board is collected.
+    Two independent potentials, summed. Ng et al.'s policy-invariance guarantee
+    holds for any Phi(s), and a sum of two valid potentials is itself a valid
+    potential - Phi(terminal) = 0 either way - so the escape term needed no
+    change to how the target term is used at the call sites, only an addition
+    here.
+
+    Target term (Phase 1): capped so "no target reachable" and "target very
+    far" are the same value; an unbounded potential would make the shaping
+    term jump whenever the last coin on a board is collected.
+
+    Escape term (Phase 4, report_linear_q.md): `t_here` is 0 when the current
+    tile never becomes lethal and 1..4 counting down to detonation, so unlike
+    target_dist a *smaller* nonzero t_here is worse, not better. Remapped into
+    an urgency score that is 0 when safe and largest right before the blast,
+    so its sign matches the target term - larger potential is always better,
+    for both.
+
+    Phase 3 found the model rarely experiences a successful escape - 1 of 2000
+    early-training episodes - so the only signal against dying was the -5
+    terminal penalty, propagated back through gamma across however many steps
+    preceded it. This adds a reward on *every step* for reducing how urgent the
+    danger is, whether or not the episode goes on to survive.
     """
-    if not self.cfg.shaping_weight:
-        return 0.0
-    dist = self.cfg.shaping_distance_cap
-    if obs.target_dir != DIR_NONE:
-        dist = min(obs.target_dist, self.cfg.shaping_distance_cap)
-    return -self.cfg.shaping_weight * dist
+    phi = 0.0
+    if self.cfg.shaping_weight:
+        dist = self.cfg.shaping_distance_cap
+        if obs.target_dir != DIR_NONE:
+            dist = min(obs.target_dist, self.cfg.shaping_distance_cap)
+        phi -= self.cfg.shaping_weight * dist
+    if self.cfg.escape_shaping_weight:
+        urgency = 0 if obs.t_here == 0 else (5 - obs.t_here)
+        phi -= self.cfg.escape_shaping_weight * urgency
+    return phi
 
 
 def _wasted_bomb(old_game_state, events):
