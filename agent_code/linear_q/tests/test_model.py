@@ -224,3 +224,101 @@ def test_unknown_schedule_name_is_rejected():
     cfg = _cfg("nonsense")
     with pytest.raises(ValueError):
         m.effective_alpha(np.ones(PHI_DIM), action=0, cfg=cfg)
+
+
+# --- masking BOMB while on cooldown (Task 2) --------------------------------
+
+def test_bomb_is_never_chosen_when_bombs_left_is_false_even_if_its_q_is_highest():
+    """Same shape of failure as the blocked-direction test: phi() has no
+    component for bomb availability, so Q(BOMB) ranking highest is no more
+    trustworthy than Q(a blocked direction) was."""
+    import types
+
+    from agent_code.linear_q import callbacks as cb
+
+    self = types.SimpleNamespace()
+    self.train = False
+    self.cfg = types.SimpleNamespace(use_symmetry=False)
+    self.legal = np.arange(6)             # allow_bomb True: BOMB is index 5
+    self.rng = np.random.default_rng(0)
+
+    class RiggedModel:
+        def values(self, phi):
+            return np.array([1.0, 1.0, 1.0, 1.0, 1.0, 100.0])   # BOMB highest
+
+    self.model = RiggedModel()
+    self.bomb_log = None
+
+    field = np.zeros((9, 9), dtype=int)
+    field[0, :] = field[-1, :] = field[:, 0] = field[:, -1] = -1
+    game_state = {
+        "field": field, "self": ("me", 0, False, (1, 1)),   # bombs_left=False
+        "coins": [], "bombs": [], "explosion_map": np.zeros_like(field),
+        "others": [], "step": 1, "round": 1,
+    }
+
+    action = cb.act(self, game_state)
+    assert action != "BOMB"
+
+
+def test_bomb_is_chosen_when_available_and_highest():
+    import types
+
+    from agent_code.linear_q import callbacks as cb
+
+    self = types.SimpleNamespace()
+    self.train = False
+    self.cfg = types.SimpleNamespace(use_symmetry=False)
+    self.legal = np.arange(6)
+    self.rng = np.random.default_rng(0)
+
+    class RiggedModel:
+        def values(self, phi):
+            return np.array([1.0, 1.0, 1.0, 1.0, 1.0, 100.0])
+
+    self.model = RiggedModel()
+    self.bomb_log = None
+
+    field = np.zeros((9, 9), dtype=int)
+    field[0, :] = field[-1, :] = field[:, 0] = field[:, -1] = -1
+    game_state = {
+        "field": field, "self": ("me", 0, True, (1, 1)),    # bombs_left=True
+        "coins": [], "bombs": [], "explosion_map": np.zeros_like(field),
+        "others": [], "step": 1, "round": 1,
+    }
+
+    action = cb.act(self, game_state)
+    assert action == "BOMB"
+
+
+def test_allow_bomb_false_is_unaffected_by_the_bomb_mask():
+    """Regression: the new bombs_left check must never be reached when BOMB was
+    already excluded from self.legal by allow_bomb=False - the masking gap this
+    closes is specifically about the *dynamic* bombs_left case."""
+    import types
+
+    from agent_code.linear_q import callbacks as cb
+
+    self = types.SimpleNamespace()
+    self.train = False
+    self.cfg = types.SimpleNamespace(use_symmetry=False)
+    self.legal = np.arange(5)             # allow_bomb False: BOMB excluded
+    self.rng = np.random.default_rng(0)
+
+    class RiggedModel:
+        def values(self, phi):
+            return np.array([1.0, 1.0, 1.0, 1.0, 1.0, 100.0])
+
+    self.model = RiggedModel()
+    self.bomb_log = None
+
+    field = np.zeros((9, 9), dtype=int)
+    field[0, :] = field[-1, :] = field[:, 0] = field[:, -1] = -1
+    game_state = {
+        "field": field, "self": ("me", 0, True, (1, 1)),
+        "coins": [], "bombs": [], "explosion_map": np.zeros_like(field),
+        "others": [], "step": 1, "round": 1,
+    }
+
+    action = cb.act(self, game_state)
+    assert action != "BOMB"

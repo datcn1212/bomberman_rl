@@ -67,7 +67,16 @@ def act(self, game_state):
     # every step instead of once at setup: the model still computes and still
     # updates Q for a blocked direction whenever a transition visits it, it is
     # only kept out of the decision.
-    candidates = [a for a in self.legal if a >= 4 or status[a] != BLOCKED]
+    #
+    # BOMB while on cooldown (`bombs_left` false) is the same trap by the same
+    # mechanism: phi() has no component for bomb availability at all, so
+    # nothing distinguishes "I can bomb" from "I cannot" in the state the model
+    # sees, and Q(BOMB) ranking highest is exactly as unguaranteed as
+    # Q(blocked direction) was. Masked here for the same reason, before Task 2
+    # ever exercises it, rather than waiting to rediscover the same failure.
+    can_bomb = bool(game_state["self"][2])
+    candidates = [a for a in self.legal
+                 if (a < 4 and status[a] != BLOCKED) or a == 4 or (a == 5 and can_bomb)]
     values = values[candidates]
 
     if self.train and self.rng.random() < self.epsilon:
