@@ -1,0 +1,7 @@
+{
+  "allow_bomb": true,
+  "continue_from": null,
+  "escape_shaping_weight": 1.0,
+  "log_path": null,
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/lq_p5_w10/seed5/model.pkl"
+}

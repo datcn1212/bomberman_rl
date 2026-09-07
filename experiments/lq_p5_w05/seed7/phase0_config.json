@@ -1,0 +1,10 @@
+{
+  "allow_bomb": true,
+  "continue_from": null,
+  "escape_shaping_weight": 0.5,
+  "git_commit": "0a95e6e",
+  "log_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/lq_p5_w05/seed7/phase0_loot-crate.csv",
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/lq_p5_w05/seed7/model_phase0.pkl",
+  "n_episodes": 6000,
+  "seed": 1679
+}

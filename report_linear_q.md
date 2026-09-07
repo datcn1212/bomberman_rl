@@ -6,14 +6,17 @@ measured, what was decided. Negative results are kept.
 
 **Where this stands.** Task 1 (coin-heaven, no bombs) is solved: masking plus
 a per-(feature, action) decaying step size converge every seed to score 50.0.
-Task 2 (loot-crate, bombs on) is partway there. A baseline collapsed
+Task 2 (loot-crate, bombs on) scores but does not survive. A baseline collapsed
 systematically - 60% of seeds learned to bomb once and then do almost nothing,
-confirmed on ten seeds and immune to re-sweeping the step-size schedule, which
-only moved which seed failed. Potential-based shaping toward escaping danger,
-one weight value tested, removed the collapse entirely (0/10 seeds at
-`coins=0.000`, was 6/10) and roughly halved the average suicide rate (86.4% ->
-44.3%) - still well above tabular_q's eventual 3.0% on the same scenario, so
-this is progress, not a solved Task 2.
+immune to re-sweeping the step-size schedule, which only moved which seed
+failed. Potential-based shaping toward escaping danger removed the collapse
+entirely (0/10 seeds at `coins=0.000`), and its weight was then swept: too much
+of it re-creates the collapse from the opposite direction, by suppressing
+bombing itself. Doubling the budget to 12000 episodes raised score 83% and
+that gain transfers to `classic`, but it bought score with lives - the agent
+now dies in 94% of rounds, at step 56 of 400, against tabular_q's 3.0% suicide
+on the same scenario. The open problem is no longer collapse or convergence; it
+is that nothing so far has made this agent bomb *and* live.
 
 ---
 
@@ -78,6 +81,8 @@ identical defaults.
 | 3b | Task 2 baseline: `loot-crate`, `allow_bomb: true`, half_life=1000, 10 seeds | 60% of seeds collapse to ~1 bomb then idle, coins exactly 0.000 | **open problem** |
 | 3c | half_life resweep (10000, 50000) on the collapsing seeds | rescues some, breaks others that were fine; no value fixes all three | **not a half_life problem** |
 | 4 | potential-based shaping toward escaping danger, weight=0.2, same 10 seeds | 0/10 seeds collapse (was 6/10); mean suicide 0.864 -> 0.443 | **kept** |
+| 5 | sweep `escape_shaping_weight` (0.05, 0.1, 0.5, 1.0) against 0.0 and 0.2 | interior values all work; 1.0 re-collapses 6/10 by the opposite mechanism | **0.1 chosen** |
+| 6 | is the 6000-episode budget still binding at the winning weight? | 12000 scores 1.83x more, and the gain transfers to `classic` | **budget was binding** |
 
 ---
 
@@ -530,6 +535,143 @@ assumed either way.
 
 ---
 
+## Phase 5 - sweeping the shaping weight
+
+### 5.1 Why a sweep, and what was declared before running it
+
+Phase 4 tested exactly one weight. The shaping reward for a one-step escape is
+`4 * w`, so at 0.2 it is 0.8 - already comparable to `reward_coin` (1.0). That
+is not a minor knob, and one sample of it is not a hyperparameter study, which
+the project brief requires be taken seriously.
+
+Swept 0.05, 0.1, 0.5, 1.0 against the two values already measured (0.0 from
+Phase 3.5, 0.2 from Phase 4), 10 seeds each, `loot-crate`, 6000 episodes.
+
+A specific prediction was recorded before the runs started: **a large enough
+weight should suppress bombing itself**, because dropping a bomb creates the
+very danger the potential penalises - the same degenerate outcome as Phase 3's
+collapse, reached from the opposite direction.
+
+### 5.2 Result
+
+| weight | score | suicide | bombs | crates | steps | collapsed seeds |
+|---|---|---|---|---|---|---|
+| 0.0 | 0.592 | 0.864 | 6.36 | 5.71 | 65.6 | **6 / 10** |
+| 0.05 | **1.387** | 0.698 | 11.47 | 10.00 | 138.3 | 0 |
+| 0.1 | 1.370 | 0.619 | 10.95 | 9.79 | 168.4 | 0 |
+| 0.2 | 1.321 | 0.443 | 30.88 | 8.08 | 234.3 | 0 |
+| 0.5 | 1.271 | 0.429 | 32.17 | 7.86 | 239.3 | 0 |
+| 1.0 | **0.047** | 0.619 | 16.66 | 3.44 | 155.8 | **6 / 10** |
+
+The prediction held. At weight 1.0 crates fall from ~10 to 3.44, score
+collapses to 0.047, and six of ten seeds are back at `coins = 0.000` - the same
+failure Phase 3 measured with no shaping at all, produced here by too much of
+it. Safety pressure large enough stops the agent creating the situation it is
+being rewarded for surviving.
+
+Everything between 0.05 and 0.5 is safe from collapse, and inside that band
+there is a real trade: 0.05 scores highest and suicides most (0.698), 0.5
+suicides least (0.429) and scores lowest. No weight is best on both axes.
+
+### 5.3 Choosing, by a rule fixed in advance
+
+The criterion was written down before the results were read, precisely so the
+winner could not be picked after seeing which number looked good:
+
+- primary: `mean_score` across the 10 seeds
+- tie-break: within 0.05 mean_score, prefer the lower suicide rate
+- boundary check: if the winner is the largest weight swept, the optimum is not
+  bracketed, so extend the sweep rather than move on
+
+0.05 and 0.1 tie on score (1.387 against 1.370, inside the 0.05 band), and 0.1
+suicides less (0.619 against 0.698), so **0.1 wins**. Not at a boundary, so the
+follow-up is the budget question rather than more weights.
+
+**A flaw in that rule, recorded because it matters.** The stated justification
+for `mean_score` was "score is the tournament objective". That is wrong as
+written: the tournament is `classic` with three opponents, while every number
+above is `loot-crate` solo, a training environment with a much denser reward.
+Fixing the criterion in advance did its job - it removed hindsight from the
+choice - but a criterion fixed in advance is only as good as the proxy it
+names, and this one named the wrong board. Phase 6 was designed around that
+gap rather than ignoring it.
+
+Wall time: 1h 55m for the four new arms. Runtime rose monotonically with weight
+(13, 30, 35, 37 minutes), which is itself a readout - a higher weight keeps the
+agent alive longer, so each episode simulates more steps.
+
+---
+
+## Phase 6 - was 6000 episodes still the binding constraint?
+
+### 6.1 The confound
+
+Every weight in Phase 5 was compared at 6000 episodes, and Phase 3 measured
+that budget alone moved suicide from 99.95% to 68%. If different weights
+converge at different rates, the ranking at 6000 need not be the ranking at
+convergence - which would make the sweep's conclusion a fact about the budget
+rather than about the weight. Re-ran the winning weight (0.1) at 12000
+episodes, same ten seeds, everything else identical.
+
+### 6.2 Result: the budget was binding, and the strategy changed shape
+
+| | 6000 ep | 12000 ep |
+|---|---|---|
+| score | 1.370 | **2.500** |
+| suicide | 0.619 | **0.938** |
+| bombs | 10.95 | 7.37 |
+| crates | 9.79 | **14.43** |
+| crates per bomb | 0.89 | **1.96** |
+| steps survived | 168.4 | **56.3** |
+
+Score up 83%, and the agent is more than twice as efficient per bomb - but it
+now dies in almost every round, at step 56 of 400. It did not learn to bomb
+*and* survive; it learned to bomb far better and stop caring about the aftermath.
+`invalid_action_rate` is 0.0 on all ten and no seed is at `coins = 0.000`, so
+this is a genuine strategy shift rather than any of the earlier failure modes.
+
+### 6.3 A prediction that turned out to be wrong
+
+Recorded before testing: this looked like a strategy that scores well only
+because of the board it was measured on. `loot-crate` has 50 coins and dense
+crates, so rushing in, bombing hard and dying at step 56 can still pay; on
+`classic` (9 coins, the tournament board) forfeiting 344 of 400 steps should
+cost more than the extra crates are worth.
+
+Both models re-evaluated on `classic`, solo, 10 seeds:
+
+| | score | suicide | crates | steps |
+|---|---|---|---|---|
+| 6000 ep | 0.253 | 0.499 | 8.74 | 212.2 |
+| 12000 ep | **0.422** | 0.858 | 13.32 | 83.7 |
+
+**The prediction was wrong.** The ordering is preserved - the 12000-episode
+model scores 67% more on `classic` too, despite surviving a quarter as long.
+The reasoning missed that on `classic` the coins are *under* the crates, so
+crate throughput is the only route to score at all: surviving to step 212
+without breaking crates (8.74 against 13.32) simply leaves nothing to collect.
+Longevity is not itself worth points.
+
+What this does *not* establish: both evaluations are solo. In a four-agent
+round, dying at step 84 hands the remaining ~316 steps to three opponents who
+are still collecting, and that opportunity cost has not been measured. The
+falsified prediction stands as falsified on what was tested; the multi-agent
+case is untested, not quietly reserved as a rescue.
+
+### 6.4 Harness limit found along the way
+
+The first `classic` evaluation crashed: `eval run lq_p5_w01_seed7 exceeded 900s
+and was killed` (`PLAY_TIMEOUT` in `tools/evaluate.py`). The cause is the
+surviving seeds - a model that lasts 400 steps across 20 rounds on 30 arenas
+exceeds the per-process budget, while a suicidal one never comes close. Re-run
+at 10 rounds instead of 20, which fits; the registry's `rounds_per_seed` column
+keeps the two sample sizes distinguishable. An earlier crash in the same phase
+(`attempting to add a session with an ID that's already in use`, at
+`--eval-workers 10`) was worked around with 5 workers; training had already
+completed, so `tools/eval_existing.py` recovered it without retraining.
+
+---
+
 ## Settings currently in force
 
 ```
@@ -538,10 +680,12 @@ gamma 0.995
 exploration "epsilon", eps 1.0 -> 0.05 over 2000 episodes
 use_symmetry True, use_opponent_blocking True
 allow_bomb True (Task 2, Phase 3)
-shaping_weight 0.0, escape_shaping_weight 0.2 (Phase 4; not yet a config
-        default - one value tested, not swept)
+shaping_weight 0.0, escape_shaping_weight 0.1 (Phase 5 sweep winner; still not
+        a config default - Phase 6 showed the sweep that chose it was itself
+        budget-limited, so the value is provisional)
 rewards: identical to tabular_q's defaults at the point this branch forked
-budget: 6000 episodes; Task 1 on `coin-heaven`, Task 2 on `loot-crate`
+budget: 12000 episodes on `loot-crate` (Phase 6: 6000 was binding); Task 1 on
+        `coin-heaven` at 6000
 ```
 
 ## Rejected, with evidence
@@ -562,22 +706,35 @@ entries are updated hundreds of thousands of times more than others (2.2).
 50000 each rescue a different seed than 1000 does while leaving another
 seed passive or broken. The failure follows the seed, not the schedule value.
 
+`escape_shaping_weight` at 1.0 or above (5.2) - large enough safety pressure
+stops the agent bombing at all, re-creating Phase 3's collapse (6/10 seeds at
+`coins = 0.000`, score 0.047) from the opposite direction. The usable band is
+roughly 0.05 to 0.5.
+
 ## Open
 
-1. **`escape_shaping_weight=0.2` fixed the collapse but not the suicide rate.**
-   0/10 seeds at `coins=0.000` (was 6/10), but mean suicide is still 44.3%
-   against tabular_q's eventual 3.0% on the same scenario (4.3). Untested:
-   whether a different weight does better, whether 6000 episodes remains the
-   binding constraint the way it was before shaping, and whether
-   `reward_survived` (still 0.0) adds anything on top of shaping rather than
-   being redundant with it.
-2. **Seed 5's profile is unexplained.** Highest coins and crates of all ten,
-   far fewer bombs, and the highest suicide rate by a wide margin (4.3) - a
-   different strategy or an unsettled outlier, not distinguished yet.
-3. **No comparison to tabular_q on any shared protocol yet.** Task 1's own
+1. **Nothing yet makes this agent bomb *and* live.** Every intervention so far
+   trades one against the other: shaping weight up buys survival and loses
+   score (5.2), budget up buys score and loses survival (6.2). The best score
+   available (12000 episodes, weight 0.1) suicides in 94% of rounds against
+   tabular_q's 3.0%. `reward_survived` is still 0.0 and untested - it is the
+   one lever aimed directly at this axis rather than at either side of the
+   trade.
+2. **The weight sweep is budget-limited and should be redone at 12000.** Phase
+   5 compared weights at 6000 episodes; Phase 6 then showed 6000 was binding
+   (6.1-6.2), so the ranking that chose 0.1 may not survive at the longer
+   budget. No weight has been measured at 12000 except 0.1.
+3. **The multi-agent cost of dying early is unmeasured.** Both `classic`
+   evaluations are solo (6.3). A four-agent round hands ~316 remaining steps to
+   live opponents when this agent dies at step 84, and that has not been
+   priced.
+4. **Seed 5's profile at weight 0.2 is unexplained.** Highest coins and crates
+   of all ten, far fewer bombs, and the highest suicide rate by a wide margin
+   (4.3) - a different strategy or an unsettled outlier, not distinguished yet.
+5. **No comparison to tabular_q on any shared protocol yet.** Task 1's own
    comparison point (Phase 26, 2.210 on the four-agent board) has no linear_q
    counterpart, and Task 2 is not yet at a state worth comparing.
-4. **`tools/verify_unchanged.py` is still hardcoded to `tabular_q`.** Every
+6. **`tools/verify_unchanged.py` is still hardcoded to `tabular_q`.** Every
    pre/post-change comparison on this branch (Phases 2.1, 4.1) has used a
    one-off script instead, because this tool cannot target `linear_q` yet -
    the same gap `train.py` and `eval_existing.py` had before Phase 1, not yet
