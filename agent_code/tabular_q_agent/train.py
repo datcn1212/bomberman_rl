@@ -1,4 +1,4 @@
-from collections import namedtuple, deque
+from collections import namedtuple
 
 from typing import List
 import yaml
