@@ -1,6 +1,7 @@
 from collections import namedtuple, deque
 
 from typing import List
+import yaml
 
 import events as e
 from .callbacks import state_to_features
@@ -12,14 +13,13 @@ Transition = namedtuple('Transition',
 def setup_training(self):
     """
     Initialise self for training purpose.
-
-    This is called after `setup` in callbacks.py.
-
-    :param self: This object is passed to all callbacks and you can set arbitrary values.
     """
-    # Example: Setup an array that will note transition tuples
-    # (s, a, r, s')
-    # self.transitions = deque(maxlen=TRANSITION_HISTORY_SIZE)
+
+    with open('config.yaml', 'r') as file:
+        cfg = yaml.safe_load(file)
+    
+    self.q_file = cfg["save_q_table"]
+    
     self.round_rewards = 0
     self.reward_history = []
 
@@ -74,7 +74,7 @@ def end_of_round(self, last_game_state: dict, last_action: str, events: List[str
         f.write(f"{self.round_rewards}\n")
     self.round_rewards = 0
 
-    self.model.save("q_table.pkl")
+    self.model.save(self.q_file)
 
 
 def reward_from_events(self, old_game_state: dict, new_game_state: dict, events: List[str]) -> int:
@@ -88,13 +88,16 @@ def reward_from_events(self, old_game_state: dict, new_game_state: dict, events:
         e.KILLED_SELF: -50,  
         e.GOT_KILLED: -50, 
         e.INVALID_ACTION: -100,  
-        e.BOMB_DROPPED: -100, 
+        e.BOMB_DROPPED: -10, 
+        e.CRATE_DESTROYED: 10000
     }
 
     reward_sum = 0
     for event in events:
         if event in game_rewards:
             reward_sum += game_rewards[event]
+        else:
+            reward_sum -= 1
 
     old_x, old_y = old_game_state["self"][3]
     new_x, new_y = new_game_state["self"][3]

@@ -69,16 +69,16 @@ class TabularQModel:
 			# self.logger.error()
 			pass
 
-	def load(self, filename):
+	def load(self, file):
 		try:
-			with open(filename, "rb") as f:
-				self.q_table = pickle.load(f)
-			# self.logger.info(f"Modelo cargado con éxito desde {filename}")
-		except FileNotFoundError:
-			# self.logger.warning(
-			# 	f"No se encontró el archivo {filename}. Se iniciará con una tabla Q vacía."
-			# )
-			pass
-		except Exception as e:
-			# self.logger.error(f"Error al cargar el modelo: {e}")
-			pass
+		# with open(filename, "rb") as f:
+			self.q_table = pickle.load(file)
+		except:
+			print("ERROR")
+		# self.logger.info(f"Modelo cargado con éxito PATATAAAA desde {filename}")
+		# except FileNotFoundError:
+		# 	self.logger.warning(
+		# 		f"No se encontró el archivo {filename}. Se iniciará con una tabla Q vacía."
+		# 	)
+		# except Exception as e:
+		# 	self.logger.error(f"Error al cargar el modelo: {e}")

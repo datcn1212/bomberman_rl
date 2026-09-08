@@ -111,3 +111,5 @@ screenshots/*.webm
 
 replays/
 results/
+experiments/
+agent_code/tabular_q_agent/reward_progress.txt

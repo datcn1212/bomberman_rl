@@ -1,0 +1,7 @@
+learning_rate: 0.01
+gamma: 0.95
+epsilon: 0.1
+load_from_scratch: False
+
+load_q_table: "q_table.pkl"
+save_q_table: "q_table.pkl"

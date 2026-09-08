@@ -1,34 +1,42 @@
 import os
 import pickle
 import random
+import yaml
 
 import numpy as np
 
 from .q_model import TabularQModel
 
 
-ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT']
+ACTIONS = ['UP', 'RIGHT', 'DOWN', 'LEFT', 'WAIT', 'BOMB']
 
 
 def setup(self):
     """
+    Load config values and create the agent
     """
-    self.epsilon = 1.0
+
+    with open('config.yaml', 'r') as file:
+        cfg = yaml.safe_load(file)
+
+    q_file = cfg["load_q_table"]
+    self.epsilon = cfg["epsilon"]
+    self.lr = cfg["learning_rate"]
+    self.gamma = cfg["gamma"]
 
     if self.train and not os.path.isfile("q_table.pkl"):
         self.logger.info("Setting up model from scratch.")
-        self.model = TabularQModel(learning_rate=0.4, gamma=0.9, actions=ACTIONS)
+        self.model = TabularQModel(learning_rate=self.lr, gamma=self.gamma, actions=ACTIONS)
     elif self.train:
-        self.epsilon = 0.1
         self.logger.info("Loading model from saved state.")
-        self.model = TabularQModel(learning_rate=0.0, gamma=0.95, actions=ACTIONS)
-        with open("q_table.pkl", "rb") as file:
+        self.model = TabularQModel(learning_rate=self.lr, gamma=self.gamma, actions=ACTIONS)
+        with open(q_file, "rb") as file:
             self.model.load(file)
     else:
         self.logger.info("Loading model from saved state for evaluation.")
-        self.model = TabularQModel(learning_rate=0.0, gamma=0.9, actions=ACTIONS)
+        self.model = TabularQModel(learning_rate=0.0, gamma=self.gamma, actions=ACTIONS)
         self.epsilon = 0.0
-        with open("q_table.pkl", "rb") as file:
+        with open(q_file, "rb") as file:
             self.model.load(file)
         
 
