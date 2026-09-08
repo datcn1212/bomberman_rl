@@ -1,7 +1,8 @@
-learning_rate: 0.01
-gamma: 0.95
-epsilon: 0.1
-load_from_scratch: False
+learning_rate: 0.2
+gamma: 0.9
+epsilon: 0.8
 
-load_q_table: "q_table.pkl"
-save_q_table: "q_table.pkl"
+load_from_scratch: false
+
+load_q_table: q_table.pkl
+save_q_table: q_table.pkl
