@@ -30,29 +30,30 @@ import matplotlib.pyplot as plt
 # ============================================================
 
 AGENT = "tabular_q_agent"
+SCENARIO = "coin-heaven"
 
 # Total training
-TOTAL_TRAINING_EPISODES = 100
+TOTAL_TRAINING_EPISODES = 10000
 
 # Episodes until evaluation
-TRAIN_CHUNK = 10
+TRAIN_CHUNK = 1000
 
 # Evaluation episodes for each evaluation phase
-VALIDATION_EPISODES = 1
+VALIDATION_EPISODES = 50
 
 # Hyperparameters
-EPSILON = 0.8
-LEARNING_RATE = 0.20
-GAMMA = 0.90
+EPSILON = 0.4
+LEARNING_RATE = 0.3
+GAMMA = 0.95
 
 # Directories
-EXPERIMENT_NAME = "coin_heaven_eps_08_lr_02_gamma_09"
+EXPERIMENT_NAME = "coin_heaven_eps_08_lr_02_gamma_095"
 RESULTS_DIR = Path("experiments") / EXPERIMENT_NAME
 CONFIG_FILE = Path("agent_code/tabular_q_agent/config.yaml")
 
 Q_TABLE_FILE = Path("agent_code/tabular_q_agent/q_table.pkl")
 TRAINING_REWARD_FILE = Path("agent_code/tabular_q_agent/reward_progress.txt")
-EVALUATION_FILE = Path("results/evaluation_01000.json")
+EVALUATION_FILE = Path("results/evaluation_1000.json")
 
 
 # ============================================================
@@ -67,7 +68,7 @@ BASE_COMMAND = [
     AGENT,
     "--no-gui",
     "--scenario",
-    "coin-heaven",
+    SCENARIO,
 ]
 
 TRAIN_COMMAND = BASE_COMMAND + [
@@ -82,7 +83,7 @@ EVAL_ROUNDS_FLAG = "--n-rounds"
 EVAL_COMMAND = BASE_COMMAND + [
     EVAL_ROUNDS_FLAG,
     "{episodes}",
-    "--save-stats", "results/evaluation_01000.json"
+    "--save-stats", str(EVALUATION_FILE)
 ]
 
 
@@ -110,6 +111,7 @@ def make_environment():
     modify_config()
 
     return env
+
 
 def modify_config(epsilon=EPSILON, gamma=GAMMA, learning_rate=LEARNING_RATE):
     yaml = YAML()
@@ -177,6 +179,7 @@ def reset_evaluation_file():
 
 
 def read_evaluation_results(filename, agent_name):
+    # TODO: hacer algo con esto
     with open(filename, "r") as f:
         results = json.load(f)
 
@@ -214,6 +217,7 @@ def read_evaluation_results(filename, agent_name):
 
 
 def save_evaluation_csv(checkpoint, rows):
+    # TODO: hacer algo con esto
 
     filename = RESULTS_DIR / f"evaluation_{checkpoint:05d}.csv"
 
@@ -232,31 +236,32 @@ def save_evaluation_csv(checkpoint, rows):
         writer.writerows(rows)
 
 
-def append_summary(checkpoint, rows):
+def append_summary(checkpoint, dic):
     """Appends row with measured metrics."""
 
     filename = RESULTS_DIR / "validation_summary.csv"
 
     file_exists = filename.exists()
 
-    rewards = [r["reward"] for r in rows]
-    scores = [r["score"] for r in rows]
-    coins = [r["coins"] for r in rows]
-    survival = [r["survival_steps"] for r in rows]
+    # TODO: training episodes acumulados entre sesiones
+
+    # rewards = [r["reward"] for r in rows]
+    # scores = [r["score"] for r in rows]
+    # coins = [r["coins"] for r in rows]
+    # survival = [r["survival_steps"] for r in rows]
 
     row = {
         "training_episodes": checkpoint,
-        "validation_episodes": len(rows),
+        "validation_episodes": len(dic["steps"]),
 
-        "reward_mean": statistics.mean(rewards),
-        "reward_median": statistics.median(rewards),
-        "reward_std": statistics.stdev(rewards) if len(rewards) > 1 else 0.0,
+        # "reward_mean": statistics.mean(rewards),
+        # "reward_median": statistics.median(rewards),
+        # "reward_std": statistics.stdev(rewards) if len(rewards) > 1 else 0.0,
 
-        "score_mean": statistics.mean(scores),
-        "coins_mean": statistics.mean(coins),
-        "survival_steps_mean": statistics.mean(survival),
+        "score_mean": dic["score"],
+        "coins_mean": statistics.mean(dic["coins"]),
+        # "survival_steps_mean": statistics.mean(survival),
     }
-
     with open(filename, "a", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=row.keys())
 
@@ -268,10 +273,12 @@ def append_summary(checkpoint, rows):
 
 def plot_validation():
     """Plot cummulative validation plots."""
+    # TODO: hacer algo con esto
 
     filename = RESULTS_DIR / "validation_summary.csv"
 
     if not filename.exists():
+        print("NO FILENAME")
         return
 
     rows = []
@@ -281,19 +288,14 @@ def plot_validation():
         rows.extend(reader)
 
     if not rows:
+        print("NO ROWS")
         return
 
     x = [int(r["training_episodes"]) for r in rows]
 
     metrics = [
-        ("reward_mean", "Reward medio", "validation_reward.png"),
         ("score_mean", "Score medio", "validation_score.png"),
         ("coins_mean", "Monedas recogidas", "validation_coins.png"),
-        (
-            "survival_steps_mean",
-            "Pasos de supervivencia",
-            "validation_survival.png",
-        ),
     ]
 
     for key, ylabel, output_name in metrics:
@@ -495,10 +497,11 @@ def main():
         #     validation_rows,
         # )
 
-        # append_summary(
-        #     checkpoint,
-        #     validation_rows,
-        # )
+        # TODO: Gestionar archivo de resultados y graficas de validacion
+        append_summary(
+            checkpoint,
+            validation_dic,
+        )
 
         plot_validation()
 
