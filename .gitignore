@@ -114,5 +114,7 @@ results/
 experiments/
 
 agent_code/tabular_q_agent/reward_progress.txt
+agent_code/linear_q_agent/reward_progress.txt
 agent_code/tabular_q_agent/logs
+agent_code/linear_q_agent/logs
 *.pkl
