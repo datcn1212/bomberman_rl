@@ -68,12 +68,15 @@ class Config:
     shaping_weight: float = 0.0
     shaping_distance_cap: int = 15
     # Phase 4 (report_linear_q.md): a second, independent potential toward
-    # safety, on top of the existing one toward the target. Off by default,
-    # tested in isolation before ever being combined with shaping_weight > 0.
-    escape_shaping_weight: float = 0.0
+    # safety, on top of the existing one toward the target. Phase 5 swept the
+    # weight (0.05-1.0) and picked 0.1 by a rule fixed before the results were
+    # read; 1.0 re-collapses the agent by suppressing bombing itself.
+    escape_shaping_weight: float = 0.1
 
     # --- run plumbing -----------------------------------------------------
-    n_episodes: int = 6000
+    # Phase 6: 6000 episodes was still the binding constraint on Task 2;
+    # 12000 is what the shipped model (Phase 8) was trained for.
+    n_episodes: int = 12000
     seed: int = 0
     model_path: str = "model.pkl"
     log_path: str = None

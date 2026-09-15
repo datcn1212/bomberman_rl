@@ -18,7 +18,9 @@ now dies in 94% of rounds, at step 56 of 400, against tabular_q's 3.0% suicide
 on the same scenario. The open problem is no longer collapse or convergence; it
 is that nothing so far has made this agent bomb *and* live. On tabular_q's own
 tournament protocol it scores 0.130 against 2.210 (t = 12.88, 10 of 10 seeds),
-so it is not the submitted agent.
+so it is not the submitted agent. It still has its own selected, verified
+model - seed 10 of the solo-trained configuration, 0.510 on held-out arenas
+(Phase 8) - as the project's required second model.
 
 ---
 
@@ -86,6 +88,7 @@ identical defaults.
 | 5 | sweep `escape_shaping_weight` (0.05, 0.1, 0.5, 1.0) against 0.0 and 0.2 | interior values all work; 1.0 re-collapses 6/10 by the opposite mechanism | **0.1 chosen** |
 | 6 | is the 6000-episode budget still binding at the winning weight? | 12000 scores 1.83x more, and the gain transfers to `classic` | **budget was binding** |
 | 7 | tabular_q's own protocol: four agents on `classic`, trained with opponents | 0.130 against tabular_q's 2.210, t = 12.88, 10/10 seeds | **not competitive** |
+| 8 | select and ship this branch's own model, seed 10 of `lq_p6_budget12k` | 0.510 on held-out arenas, not used to pick it | **shipped** |
 
 ---
 
@@ -728,6 +731,94 @@ to the representation.
 
 ---
 
+## Phase 8 - selecting and shipping this branch's own model
+
+The assignment requires at least two models, and both need a real, selected,
+working checkpoint in the repository even though Phase 7 already settled which
+one goes into the tournament zip. This phase ships linear_q's.
+
+### 8.1 Which configuration to ship
+
+Two trained variants exist at the chosen weight (0.1): trained with opponents
+on `classic` for 6000 episodes (Phase 7.3, four-agent score 0.130), and trained
+solo on `loot-crate` for 12000 episodes then dropped onto the four-agent board
+(Phase 7.2, score 0.398). The second is the one actually deployed to a
+four-agent board of anything, so it is the one shipped, despite the budget and
+training-opponent confound Open item 3 leaves unresolved - "better on the
+metric that matters, for a reason not yet isolated" is still better.
+
+The ten seeds trained for that configuration in Phase 6 (`lq_p6_budget12k`)
+were reused rather than retrained: identical config, no reason to spend the
+training cost twice.
+
+### 8.2 Selecting a seed, the same way tabular_q did
+
+`tools/ship/choose.py` was hardcoded to `tabular_q` (Open item 5's class of
+gap, now closed for this tool specifically): agent name, its config env var and
+the opponent list were all fixed in the function body. Generalised to take
+`--agent`, `--opponents` and `--scenario`, resolving the env var through the
+`CONFIG_ENV_VAR` registry Phase 1's Setup already established - tabular_q's own
+invocation is unaffected since every new flag defaults to its previous
+hardcoded value.
+
+Same procedure as tabular_q's Phase 26.3: rank the ten seeds on arenas
+9101-9130 (`SELECTION_SEEDS`, disjoint from the standard 9001-9030 block), pick
+the winner, then report its score on 9001-9030 - data the selection never saw.
+Opponents are the stock, unseeded `rule_based_agent` rather than the seeded
+variant used throughout development: this step is meant to read as close to
+the real tournament as possible, not to minimise variance.
+
+| seed | selection score (9101-9130) |
+|---|---|
+| 1 | 0.403 |
+| 2 | 0.433 |
+| 3 | 0.310 |
+| 4 | 0.480 |
+| 5 | 0.467 |
+| 6 | 0.453 |
+| 7 | 0.347 |
+| 8 | 0.453 |
+| 9 | 0.397 |
+| **10** | **0.503** |
+
+Selection block: mean 0.425, sd 0.061, range 0.310-0.503. Seed 10 wins.
+
+### 8.3 The number that counts
+
+Seed 10, evaluated on 9001-9030 against three unseeded `rule_based_agent` - the
+same opponent as the selection step, the block selection never touched:
+**score 0.510**, coins 0.393, kills 0.023, suicide 0.917. Higher than its own
+selection-block score (0.503), inside that block's sd of 0.061, not a sign of
+anything - the two blocks are supposed to disagree by about that much.
+
+### 8.4 Verification before calling it shipped
+
+`agent_code/linear_q/model.pkl` is seed 10's checkpoint. Loaded through the
+real submission code, not inspected as a raw pickle: `phi_dim` 33 and
+`feature_version` 3 match the current code, `feature_flags` correctly restores
+`use_symmetry: True`, weight norm 4.86.
+
+Worst-case decision time, measured through `callbacks.act` over a full
+400-step episode: mean 0.036 ms, worst 0.103 ms - about 4900x inside the 500 ms
+budget. Played once through the real engine (`main.py play`, no config file,
+so pure `Config()` defaults) against three `rule_based_agent`: finishes without
+error, 60 bombs and 54 crates across two rounds, confirming the shipped model
+is not the collapsed, inert kind Phase 3 and Phase 5's weight=1.0 arm produced.
+
+### 8.5 Config defaults now match what shipped
+
+`escape_shaping_weight` (0.0 -> 0.1) and `n_episodes` (6000 -> 12000) were
+still at their pre-Phase-5/6 values in `config.py` - the exact failure mode
+CLAUDE.md's lessons name: a decision written in a report does not by itself
+change a code default. Both now match the shipped configuration.
+
+**Decision:** ship seed 10 as `agent_code/linear_q/model.pkl`. This does not
+change Phase 7's conclusion - tabular_q remains the submitted agent - it only
+means linear_q now has its own real, selected, verified checkpoint rather than
+an untrained placeholder.
+
+---
+
 ## Settings currently in force
 
 ```
@@ -736,12 +827,14 @@ gamma 0.995
 exploration "epsilon", eps 1.0 -> 0.05 over 2000 episodes
 use_symmetry True, use_opponent_blocking True
 allow_bomb True (Task 2, Phase 3)
-shaping_weight 0.0, escape_shaping_weight 0.1 (Phase 5 sweep winner; still not
-        a config default - Phase 6 showed the sweep that chose it was itself
-        budget-limited, so the value is provisional)
+shaping_weight 0.0, escape_shaping_weight 0.1 (Phase 5 sweep winner, still
+        provisional per Open item 2 - Phase 6 showed the sweep that chose it
+        was itself budget-limited - but this is what shipped, Phase 8)
 rewards: identical to tabular_q's defaults at the point this branch forked
 budget: 12000 episodes on `loot-crate` (Phase 6: 6000 was binding); Task 1 on
         `coin-heaven` at 6000
+shipped model: seed 10 of `lq_p6_budget12k`, selected on arenas 9101-9130,
+        scores 0.510 on 9001-9030 (Phase 8)
 ```
 
 ## Rejected, with evidence
@@ -791,3 +884,7 @@ roughly 0.05 to 0.5.
    one-off script instead, because this tool cannot target `linear_q` yet -
    the same gap `train.py` and `eval_existing.py` had before Phase 1, not yet
    closed here.
+6. **The rest of `tools/ship/` (`latency.py`, `check.py`, `gate.py`) is still
+   hardcoded to `tabular_q`.** Only `choose.py` was generalised (8.2), because
+   that was the one this phase needed; submission-readiness for linear_q was
+   verified by hand instead (8.4).
