@@ -33,6 +33,27 @@ ROOT = Path(__file__).resolve().parent.parent
 RESULTS = ROOT / "results"
 REGISTRY = ROOT / "experiments" / "registry.csv"
 
+# Each agent picks its own environment variable for the config path it reads
+# (agent_code/<name>/config.py), because the framework gives an agent no other
+# way to receive run-specific parameters. A hardcoded "TQ_CONFIG" here would
+# make every tool silently train and evaluate any other agent on its untouched
+# defaults - no error, just a run that measured nothing it claims to have
+# measured. New agents register here; a name that is missing fails loudly
+# rather than falling through to a wrong variable.
+CONFIG_ENV_VAR = {
+    "tabular_q": "TQ_CONFIG",
+    "linear_q": "LQ_CONFIG",
+}
+
+
+def config_env_var(agent):
+    try:
+        return CONFIG_ENV_VAR[agent]
+    except KeyError:
+        raise KeyError(
+            "no config env var registered for agent %r; add it to "
+            "tools/evaluate.py:CONFIG_ENV_VAR" % agent) from None
+
 # Fixed evaluation seeds. Training never uses these, so every reported number is
 # measured on arenas the agent was not trained on. Identical for every version
 # so that comparisons across experiments are fair.

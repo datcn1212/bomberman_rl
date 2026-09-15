@@ -1,0 +1,7 @@
+{
+  "allow_bomb": false,
+  "alpha": 0.01,
+  "continue_from": null,
+  "log_path": null,
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/lq_p1c_a01/seed3/model.pkl"
+}

@@ -28,12 +28,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from tools.evaluate import EVAL_SEEDS, evaluate, format_metrics, register  # noqa: E402
+from tools.evaluate import (EVAL_SEEDS, config_env_var, evaluate,  # noqa: E402
+                            format_metrics, register)
 
 EXPERIMENTS = ROOT / "experiments"
 
 
-def code_fingerprint():
+def code_fingerprint(agent):
     """Commit of the agent code, plus a dirty marker.
 
     Stamped into every phase config so that two runs can never be compared
@@ -43,7 +44,7 @@ def code_fingerprint():
         head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
                               capture_output=True, text=True).stdout.strip()
         dirty = subprocess.run(["git", "status", "--porcelain", "--",
-                                "agent_code/tabular_q"], cwd=ROOT,
+                                "agent_code/%s" % agent], cwd=ROOT,
                                capture_output=True, text=True).stdout.strip()
     except Exception:
         return "unknown"
@@ -103,7 +104,7 @@ def run_seed(job):
         # derived from the training seed, so each of the ten seeds meets a
         # different but reproducible opponent rather than all ten meeting the
         # same one. Ignored by the stock `rule_based_agent`.
-        env = dict(os.environ, TQ_CONFIG=str(config_path),
+        env = dict(os.environ, **{config_env_var(args_agent): str(config_path)},
                    OPP_SEED=str(TRAIN_SEED_BASE + seed_index))
         started = time.time()
         proc = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
@@ -159,7 +160,7 @@ def main():
           % (args.exp_id, args.phases, args.seeds, overrides, phase_overrides),
           flush=True)
 
-    fingerprint = code_fingerprint()
+    fingerprint = code_fingerprint(args.agent)
     print("agent code at %s" % fingerprint, flush=True)
     jobs = [(args.exp_id, seed, phases, overrides, phase_overrides,
              args.full_rounds, False, args.agent, fingerprint)
@@ -176,7 +177,8 @@ def main():
         metrics = evaluate(
             args.agent, args.eval_opponents, eval_scenario, mode=args.eval_mode,
             seeds=EVAL_SEEDS[:args.eval_seeds], n_rounds=args.eval_rounds, tag=tag,
-            extra_env={"TQ_CONFIG": _eval_config(args.exp_id, seed, model_path, overrides)},
+            extra_env={config_env_var(args.agent):
+                      _eval_config(args.exp_id, seed, model_path, overrides)},
             workers=args.eval_workers)
         print(format_metrics(metrics), flush=True)
         register(metrics, exp_id=tag, note=args.note)

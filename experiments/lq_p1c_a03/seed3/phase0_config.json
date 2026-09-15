@@ -1,0 +1,10 @@
+{
+  "allow_bomb": false,
+  "alpha": 0.03,
+  "continue_from": null,
+  "git_commit": "320d7c1",
+  "log_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/lq_p1c_a03/seed3/phase0_coin-heaven.csv",
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/lq_p1c_a03/seed3/model_phase0.pkl",
+  "n_episodes": 2000,
+  "seed": 1291
+}
