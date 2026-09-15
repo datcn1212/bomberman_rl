@@ -1,0 +1,8 @@
+{
+  "continue_from": null,
+  "eps_decay_episodes": 2000,
+  "gamma": 0.995,
+  "log_path": null,
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p18_nosym_opp/seed10/model.pkl",
+  "use_opponent_blocking": true
+}

@@ -1,0 +1,11 @@
+{
+  "allow_bomb": false,
+  "alpha_half_life": 1000.0,
+  "alpha_schedule": "visit",
+  "continue_from": null,
+  "log_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p2_visit2k/seed10/phase0_coin-heaven.csv",
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p2_visit2k/seed10/model_phase0.pkl",
+  "n_episodes": 2000,
+  "seed": 1970,
+  "trace_state": 54
+}

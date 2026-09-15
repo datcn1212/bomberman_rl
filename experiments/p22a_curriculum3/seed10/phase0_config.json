@@ -1,0 +1,8 @@
+{
+  "continue_from": null,
+  "git_commit": "1221954",
+  "log_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p22a_curriculum3/seed10/phase0_loot-crate.csv",
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p22a_curriculum3/seed10/model_phase0.pkl",
+  "n_episodes": 2000,
+  "seed": 1970
+}

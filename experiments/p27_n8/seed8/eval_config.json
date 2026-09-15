@@ -1,0 +1,6 @@
+{
+  "continue_from": null,
+  "log_path": null,
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p27_n8/seed8/model.pkl",
+  "n_step": 8
+}

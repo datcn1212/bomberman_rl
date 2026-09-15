@@ -1,0 +1,9 @@
+{
+  "continue_from": null,
+  "git_commit": "1221954",
+  "log_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p22c_oppdist/seed6/phase0_classic.csv",
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p22c_oppdist/seed6/model_phase0.pkl",
+  "n_episodes": 6000,
+  "seed": 1582,
+  "use_opponent_distance": true
+}

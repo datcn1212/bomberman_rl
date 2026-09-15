@@ -1,0 +1,8 @@
+{
+  "continue_from": null,
+  "eps_decay_episodes": 3000,
+  "log_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p3_danger/seed1/phase0_loot-crate.csv",
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p3_danger/seed1/model_phase0.pkl",
+  "n_episodes": 4000,
+  "seed": 1097
+}

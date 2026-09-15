@@ -1,0 +1,19 @@
+{
+  "alpha": 0.2,
+  "alpha_half_life": 4000.0,
+  "continue_from": null,
+  "eps_decay_episodes": 2000,
+  "eps_end": 0.1,
+  "gamma": 0.999,
+  "git_commit": "8e28f0e",
+  "log_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/hp_s05/seed2/phase0_classic.csv",
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/hp_s05/seed2/model_phase0.pkl",
+  "n_episodes": 4000,
+  "reward_coin_found": 0.3,
+  "reward_crate": 0.6,
+  "reward_step": -0.01,
+  "reward_wait": -0.05,
+  "seed": 1194,
+  "use_opponent_blocking": true,
+  "use_symmetry": true
+}

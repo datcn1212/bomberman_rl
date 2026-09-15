@@ -1,0 +1,8 @@
+{
+  "continue_from": null,
+  "git_commit": "ca2a63f",
+  "log_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/repeat_c/seed1/phase0_classic.csv",
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/repeat_c/seed1/model_phase0.pkl",
+  "n_episodes": 6000,
+  "seed": 1097
+}

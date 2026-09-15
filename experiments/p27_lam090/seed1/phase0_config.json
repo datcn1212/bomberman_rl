@@ -1,0 +1,9 @@
+{
+  "continue_from": null,
+  "git_commit": "8a95c66",
+  "log_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p27_lam090/seed1/phase0_classic.csv",
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p27_lam090/seed1/model_phase0.pkl",
+  "n_episodes": 6000,
+  "seed": 1097,
+  "td_lambda": 0.9
+}

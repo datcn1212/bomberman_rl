@@ -1,0 +1,13 @@
+{
+  "continue_from": null,
+  "eps_decay_episodes": 2000,
+  "gamma": 0.995,
+  "git_commit": "b0531b3",
+  "log_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p20b_bombsafety/seed4/phase0_classic.csv",
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/p20b_bombsafety/seed4/model_phase0.pkl",
+  "n_episodes": 12000,
+  "seed": 1388,
+  "use_bomb_safety": true,
+  "use_opponent_blocking": true,
+  "use_symmetry": true
+}

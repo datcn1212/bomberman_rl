@@ -1,0 +1,16 @@
+{
+  "alpha": 0.05,
+  "alpha_half_life": 1000.0,
+  "continue_from": null,
+  "eps_decay_episodes": 1000,
+  "eps_end": 0.05,
+  "gamma": 0.99,
+  "log_path": null,
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/hp_c09/seed8/model.pkl",
+  "reward_coin_found": 0.3,
+  "reward_crate": 0.3,
+  "reward_step": -0.01,
+  "reward_wait": -0.05,
+  "use_opponent_blocking": true,
+  "use_symmetry": true
+}
