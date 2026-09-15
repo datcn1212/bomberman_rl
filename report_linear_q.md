@@ -16,7 +16,9 @@ bombing itself. Doubling the budget to 12000 episodes raised score 83% and
 that gain transfers to `classic`, but it bought score with lives - the agent
 now dies in 94% of rounds, at step 56 of 400, against tabular_q's 3.0% suicide
 on the same scenario. The open problem is no longer collapse or convergence; it
-is that nothing so far has made this agent bomb *and* live.
+is that nothing so far has made this agent bomb *and* live. On tabular_q's own
+tournament protocol it scores 0.130 against 2.210 (t = 12.88, 10 of 10 seeds),
+so it is not the submitted agent.
 
 ---
 
@@ -83,6 +85,7 @@ identical defaults.
 | 4 | potential-based shaping toward escaping danger, weight=0.2, same 10 seeds | 0/10 seeds collapse (was 6/10); mean suicide 0.864 -> 0.443 | **kept** |
 | 5 | sweep `escape_shaping_weight` (0.05, 0.1, 0.5, 1.0) against 0.0 and 0.2 | interior values all work; 1.0 re-collapses 6/10 by the opposite mechanism | **0.1 chosen** |
 | 6 | is the 6000-episode budget still binding at the winning weight? | 12000 scores 1.83x more, and the gain transfers to `classic` | **budget was binding** |
+| 7 | tabular_q's own protocol: four agents on `classic`, trained with opponents | 0.130 against tabular_q's 2.210, t = 12.88, 10/10 seeds | **not competitive** |
 
 ---
 
@@ -672,6 +675,59 @@ completed, so `tools/eval_existing.py` recovered it without retraining.
 
 ---
 
+## Phase 7 - tabular_q's protocol: four agents on `classic`
+
+### 7.1 Why
+
+Every number above is solo, and the tournament is four agents on `classic`.
+tabular_q's anchor (its Phase 26: 6000 episodes on `classic` against three
+seeded opponents, ten seeds) had no linear_q counterpart, and 6.3 left the
+multi-agent cost of dying early unpriced. Two measurements close both.
+
+### 7.2 The solo-trained models, dropped onto the four-agent board
+
+The Phase 6 models (weight 0.1, 12000 episodes, trained solo on `loot-crate`),
+re-evaluated against three `rule_based_seeded` opponents on `classic`, 10 rounds
+per arena: score 0.398, coins 0.330, kills 0.014, self-kill rate 0.894.
+
+### 7.3 Trained with opponents, on tabular_q's exact protocol
+
+`classic:6000@rule_based_seeded+rule_based_seeded+rule_based_seeded`, the same
+ten seeds, weight 0.1, evaluated on the four-agent board:
+
+| same protocol, 10 seeds | tabular_q (Phase 26 anchor) | linear_q |
+|---|---|---|
+| score | **2.210** | 0.130 |
+| self-kill rate | 0.527 | 0.888 |
+| bombs per round | 17.9 | 4.4 |
+| crates per round | 35.4 | 4.9 |
+| steps survived | 344 | 327 |
+
+Paired over the same ten seeds, tabular_q is ahead by 2.080 (sd 0.511),
+t = 12.88, and ahead on all ten seeds individually.
+
+The two agents survive about equally long - 344 steps against 327 - so the gap
+is not that linear_q dies sooner. It barely acts: 4.4 bombs and 4.9 crates per
+round against 17.9 and 35.4. On `classic` every coin starts under a crate, so a
+policy that does not break crates cannot score however long it lives.
+
+Training with opponents made this agent *worse* (0.130) than training it solo
+and dropping it in (0.398), the opposite of tabular_q's own Phase 17a (+0.42).
+The direction is not attributable to either factor: the solo-trained models had
+12000 episodes and these had 6000, so budget and training opponents differ at
+once.
+
+Training took 13114 s for ten seeds - about 25x the per-episode cost of the solo
+run in Phase 6, since every step simulates four agents and the agent now
+survives most of the round.
+
+**Decision:** not competitive on the tournament protocol. tabular_q is the
+submitted agent; this branch's value is that it shares the observation code,
+reward design and harness with tabular_q, so its failure modes are attributable
+to the representation.
+
+---
+
 ## Settings currently in force
 
 ```
@@ -724,17 +780,13 @@ roughly 0.05 to 0.5.
    5 compared weights at 6000 episodes; Phase 6 then showed 6000 was binding
    (6.1-6.2), so the ranking that chose 0.1 may not survive at the longer
    budget. No weight has been measured at 12000 except 0.1.
-3. **The multi-agent cost of dying early is unmeasured.** Both `classic`
-   evaluations are solo (6.3). A four-agent round hands ~316 remaining steps to
-   live opponents when this agent dies at step 84, and that has not been
-   priced.
+3. **Why training with opponents hurt is unresolved.** 0.130 trained with
+   opponents against 0.398 trained solo (7.2-7.3), but the budgets differ too
+   (6000 against 12000), so the direction is not attributed to either.
 4. **Seed 5's profile at weight 0.2 is unexplained.** Highest coins and crates
    of all ten, far fewer bombs, and the highest suicide rate by a wide margin
    (4.3) - a different strategy or an unsettled outlier, not distinguished yet.
-5. **No comparison to tabular_q on any shared protocol yet.** Task 1's own
-   comparison point (Phase 26, 2.210 on the four-agent board) has no linear_q
-   counterpart, and Task 2 is not yet at a state worth comparing.
-6. **`tools/verify_unchanged.py` is still hardcoded to `tabular_q`.** Every
+5. **`tools/verify_unchanged.py` is still hardcoded to `tabular_q`.** Every
    pre/post-change comparison on this branch (Phases 2.1, 4.1) has used a
    one-off script instead, because this tool cannot target `linear_q` yet -
    the same gap `train.py` and `eval_existing.py` had before Phase 1, not yet
