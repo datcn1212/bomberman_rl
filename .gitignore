@@ -111,10 +111,11 @@ screenshots/*.webm
 
 replays/
 results/
-experiments/
 
 agent_code/tabular_q_agent/reward_progress.txt
 agent_code/linear_q_agent/reward_progress.txt
 agent_code/tabular_q_agent/logs
 agent_code/linear_q_agent/logs
-*.pkl
+
+# bulk checkpoints; evidence (csv/json) and agent models stay tracked
+experiments/**/*.pkl
