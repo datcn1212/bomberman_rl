@@ -1,0 +1,8 @@
+{
+  "allow_bomb": true,
+  "continue_from": null,
+  "escape_shaping_weight": 0.1,
+  "log_path": null,
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/lq_p9_rs1/seed4/model.pkl",
+  "reward_survived": 1.0
+}

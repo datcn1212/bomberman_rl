@@ -1,0 +1,11 @@
+{
+  "allow_bomb": true,
+  "continue_from": null,
+  "escape_shaping_weight": 0.1,
+  "git_commit": "f83d282",
+  "log_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/lq_p9_rs5/seed1/phase0_loot-crate.csv",
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/lq_p9_rs5/seed1/model_phase0.pkl",
+  "n_episodes": 12000,
+  "reward_survived": 5.0,
+  "seed": 1097
+}
