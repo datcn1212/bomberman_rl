@@ -1,24 +1,18 @@
-"""The pipeline that turns a trained seed into a submission.
+"""Turning a trained seed into a submission.
 
-Subcommands:
+    python3 tools/ship.py choose    pick which seed to ship, on held-out arenas
+    python3 tools/ship.py final     decisive measurement of the shipped model
+    python3 tools/ship.py check     the assignment's hard constraints
 
-    choose     pick which seed to ship, on held-out arenas
-    final      the decisive measurement of the shipped model
-    gate       EXACT mode, the only way to count win rate
-    check      the assignment's hard constraints
-    latency    worst-case decision time
-
-    python3 tools/ship.py <subcommand> [args...]
-
-Each subcommand lives in tools/ship/ and can also be run directly; this file
-exists so that `tools/` shows one entry per job rather than one per script.
+Each subcommand is a script in tools/ship/ and runs standalone too; this just
+gives tools/ one entry per job.
 """
 
 import runpy
 import sys
 from pathlib import Path
 
-SUBCOMMANDS = ["choose", "final", "gate", "check", "latency"]
+SUBCOMMANDS = ["choose", "final", "check"]
 
 
 def main():

@@ -1,16 +1,14 @@
-"""State representation.
+"""Turning a game_state into the small tuple the agent actually learns from.
 
-Phase 3 scope: crates and the agent's own bombs. The Phase 0 measurements fix
-the timing model used here:
+The important design point: danger is not a property of a tile, it is a
+property of a (tile, step) pair. A tile that burns in three steps can be
+crossed now. So instead of an "is dangerous" flag we build a schedule
+lethal[k] = which tiles kill you k decisions from now, and search over it.
 
-  * a bomb observed with timer `t` detonates at the end of the step `t` decisions
-    from now, and its tiles are lethal on that decision and on the next one;
-  * a tile with `explosion_map > 0` is lethal on the current decision only;
-  * a bomb dropped now becomes visible next step with timer 3, so its blast is
-    lethal 4 and 5 decisions from now.
-
-The consequence is that danger is not a property of a tile but of a
-**(tile, step) pair**, so the features carry a schedule rather than a flag.
+Timing (checked against the framework in Phase 0):
+  bomb with timer t  -> lethal at k = t and k = t+1
+  explosion_map > 0  -> lethal at k = 0 only
+  bomb dropped now   -> shows up next step with timer 3, so lethal at k = 4, 5
 """
 
 from collections import deque
@@ -21,43 +19,30 @@ import settings as s
 
 ACTIONS = ["UP", "RIGHT", "DOWN", "LEFT", "WAIT", "BOMB"]
 
-# Index i of DIRS is the offset of ACTIONS[i], so a direction index and a move
-# action index are the same number everywhere in this agent.
+# DIRS[i] is the offset for ACTIONS[i], so "direction index" and "move action
+# index" are the same number throughout the agent. Don't reorder these.
 DIRS = ((0, -1), (1, 0), (0, 1), (-1, 0))
 
-# How far ahead the danger schedule is built. A bomb dropped now is lethal 5
-# decisions from now, so the horizon has to cover at least that.
 HORIZON = s.BOMB_TIMER + s.EXPLOSION_TIMER
 
-# move_status values
+# move_status
 BLOCKED, FREE_SAFE, FREE_LETHAL = 0, 1, 2
-
-# target_dir / escape_dir values: 0 = none, 1..4 = DIRS, 5 = stay where you are
+# target_dir / escape_dir: 0 = none, 1..4 = DIRS, 5 = stay put
 DIR_NONE, DIR_HERE = 0, 5
-
-# target_kind values
+# target_kind
 KIND_CRATE, KIND_COIN = 0, 1
 
-# Reserved slots, held constant. See `observe`.
+# Slots kept in the encoding but no longer filled (Phases 5, 20, 22).
 BOMB_NONE = 0
 OPP_NONE = 0
 
-
-# Which optional state components are switched on. Set once at setup and stored
-# inside the model, so that a model is always evaluated with the same
-# observation it was trained on. Holding a component at a constant value
-# collapses it out of the encoding without changing LAYOUT, which is what makes
-# a clean ablation possible.
+# Set at setup() and stored in the model, so a model is always evaluated with
+# the same observation it was trained with.
 FLAGS = {"use_opponent_blocking": False}
 
 
 def blast_tiles(field, x, y):
-    """Tiles a bomb at (x, y) would burn: straight rays stopped by walls.
-
-    Measured in Phase 0: rays never turn corners and stop *at* the first wall.
-    Crates burn but do not shield tiles behind them, because the crate is
-    destroyed by the same blast.
-    """
+    """Tiles a bomb at (x, y) burns. Rays stop at walls and don't turn corners."""
     tiles = [(x, y)]
     for dx, dy in DIRS:
         for i in range(1, s.BOMB_POWER + 1):
@@ -67,14 +52,14 @@ def blast_tiles(field, x, y):
             if field[cx, cy] == -1:
                 break
             tiles.append((cx, cy))
+            # crates burn but don't shield what's behind them
     return tiles
 
 
 def danger_schedule(game_state, extra_bomb=None):
-    """lethal[k][x, y] is True when standing on (x, y) k decisions from now kills.
+    """lethal[k][x, y]: standing on (x, y) in k decisions is fatal.
 
-    `extra_bomb` adds a hypothetical bomb dropped by the agent on this step, so
-    the same routine answers both "am I safe" and "would bombing here be safe".
+    extra_bomb lets us ask "what if I bombed here", using the same code.
     """
     field = game_state["field"]
     lethal = np.zeros((HORIZON + 1,) + field.shape, dtype=bool)
@@ -86,45 +71,41 @@ def danger_schedule(game_state, extra_bomb=None):
                 for tx, ty in tiles:
                     lethal[k][tx, ty] = True
 
-    # A blast already on the board kills anything standing in it right now.
-    explosion = game_state["explosion_map"]
-    lethal[0] |= explosion > 0
+    lethal[0] |= game_state["explosion_map"] > 0
 
     if extra_bomb is not None:
-        tiles = blast_tiles(field, *extra_bomb)
-        for k in (s.BOMB_TIMER, s.BOMB_TIMER + 1):
-            if k <= HORIZON:
-                for tx, ty in tiles:
+        for tx, ty in blast_tiles(field, *extra_bomb):
+            for k in (s.BOMB_TIMER, s.BOMB_TIMER + 1):
+                if k <= HORIZON:
                     lethal[k][tx, ty] = True
     return lethal
 
 
 class Board:
-    """One game step: what is walkable, what is dangerous, and where things are."""
+    """One step of the game: what we can walk on, what will kill us, where things are."""
 
     def __init__(self, game_state, extra_bomb=None):
         self.field = game_state["field"]
         self.pos = game_state["self"][3]
         self.coins = game_state["coins"]
         self.bomb_tiles = {tuple(pos) for pos, _ in game_state["bombs"]}
-        # Two agents cannot share a tile, so moving into an occupied one is an
-        # invalid action: the agent stays put. Ignoring that is how a planned
-        # escape route ends with the agent standing still inside a blast.
-        self.other_tiles = ({tuple(other[3]) for other in game_state["others"]}
-                            if FLAGS["use_opponent_blocking"] else set())
+        # Only used for the immediate move: two agents can't share a tile, so
+        # stepping onto one is an invalid action and we don't move at all.
+        if FLAGS["use_opponent_blocking"]:
+            self.other_tiles = {tuple(other[3]) for other in game_state["others"]}
+        else:
+            self.other_tiles = set()
         self.lethal = danger_schedule(game_state, extra_bomb)
         self.width, self.height = self.field.shape
 
     def is_free(self, x, y):
-        """Walkable this step: not a wall, not a crate, not an armed bomb."""
         return self.field[x, y] == 0 and (x, y) not in self.bomb_tiles
 
     def walkable(self, tile, now=False):
-        """`now` also excludes tiles an opponent is standing on.
+        """now=True also rules out tiles an opponent occupies right now.
 
-        Only the *immediate* move is blocked by a body. Beyond that the
-        opponents have moved too, and treating them as permanent walls would
-        make the agent believe it is trapped when it is not.
+        Further into the future they will have moved, and treating them as
+        walls there makes the agent think it is trapped when it isn't.
         """
         x, y = tile
         if not (0 <= x < self.width and 0 <= y < self.height and self.is_free(x, y)):
@@ -141,32 +122,26 @@ class Board:
         return bool(self.lethal[min(k, HORIZON)][tile[0], tile[1]])
 
     def escape_search(self):
-        """Is there a sequence of moves that survives the whole horizon?
+        """First move of a path that survives the whole horizon.
 
-        Searched over (tile, step) pairs rather than tiles: a tile that burns at
-        step 3 may still be crossed at step 1, and a tile that is safe now may
-        be a death trap in two steps. A tile-only search cannot express either.
-
-        Returns the first move of a surviving path: DIR_HERE when standing still
-        already survives, 1..4 for a direction, DIR_NONE when nothing survives.
+        BFS over (tile, step), not just tile - that is the whole point of the
+        schedule. Returns DIR_HERE if standing still is already safe, 1..4 for
+        a direction, DIR_NONE if nothing survives.
         """
         if self.lethal_at(self.pos, 0):
-            # Already standing in a blast that goes off this step; nothing to do.
-            return DIR_NONE
+            return DIR_NONE          # blast lands here this step, too late
         if all(not self.lethal_at(self.pos, k) for k in range(HORIZON + 1)):
-            # Standing still already survives. Reported first so the agent is not
-            # told to move when there is no reason to.
             return DIR_HERE
 
-        # Staying put is seeded as an option too, because waiting one step for a
-        # blast to clear is sometimes the only route out of a corridor. It is
-        # seeded *last* so that a real move wins any tie: reporting "stay" when
-        # the agent must actually leave within the horizon would be misleading.
-        queue = deque()
-        seen = set()
+        # Seed the four moves first and "stay put" last, so a real move wins a
+        # tie. Waiting is still an option - sometimes it is the only way out of
+        # a corridor - but we shouldn't report "stay" if we do have to leave.
         options = [((self.pos[0] + dx, self.pos[1] + dy), i + 1)
                    for i, (dx, dy) in enumerate(DIRS)]
         options.append((self.pos, DIR_HERE))
+
+        queue = deque()
+        seen = set()
         for tile, first_move in options:
             if tile != self.pos and not self.walkable(tile, now=True):
                 continue
@@ -186,23 +161,19 @@ class Board:
         return DIR_NONE
 
     def steps_until_lethal(self):
-        """How many decisions until the current tile burns; 0 when it never does."""
+        """Decisions left before this tile burns; 0 if it never does."""
         for k in range(HORIZON + 1):
             if self.lethal_at(self.pos, k):
                 return min(k + 1, 4)
         return 0
 
     def target_search(self, coins):
-        """Shortest path to the nearest coin, or to a tile next to a crate.
+        """Nearest coin, or nearest tile next to a crate. Returns (dir, kind, dist).
 
-        One search, two goal tests: standing on a coin, or standing next to a
-        crate (a crate cannot be walked onto, so being adjacent to it is what
-        "reaching" it means). Breadth-first, so the first goal found is the
-        nearest one, and a coin wins a tie because it is tested first.
-
-        Tiles that burn now or on the next step are treated as walls. Routing a
-        path through them is exactly what makes an agent walk into a blast on
-        its way to a coin.
+        One BFS with two goal tests. A crate can't be walked onto, so "reaching"
+        it means standing next to it. Coins are tested first, so they win ties.
+        Tiles burning now or next step count as walls - routing through them is
+        how an agent walks into a blast on its way to a coin.
         """
         coin_goals = set(coins)
         if self.pos in coin_goals:
@@ -231,7 +202,7 @@ class Board:
         return DIR_NONE, KIND_COIN, 0
 
     def bomb_payload(self):
-        """How many crates a bomb dropped here would destroy."""
+        """Crates a bomb dropped here would destroy."""
         return sum(1 for tx, ty in blast_tiles(self.field, *self.pos)
                    if self.field[tx, ty] == 1)
 
@@ -239,8 +210,7 @@ class Board:
         x, y = tile
         for dx, dy in DIRS:
             cx, cy = x + dx, y + dy
-            if (0 <= cx < self.width and 0 <= cy < self.height
-                    and self.field[cx, cy] == 1):
+            if 0 <= cx < self.width and 0 <= cy < self.height and self.field[cx, cy] == 1:
                 return True
         return False
 
@@ -287,16 +257,15 @@ def observe(game_state):
             move_status.append(FREE_SAFE)
 
     target_dir, target_kind, target_dist = board.target_search(board.coins)
+
+    # bomb_opt / opponent / last_move are held constant: they were measured and
+    # rejected, but stay in the layout so old models still load.
     return Observation(
         move_status=tuple(move_status),
         t_here=board.steps_until_lethal(),
         target_dir=target_dir,
         target_kind=target_kind,
         escape_dir=board.escape_search(),
-        # Three slots the encoding still reserves but no longer fills. Each was
-        # measured and rejected (report, Phases 5, 20 and 22); they are held at a
-        # constant so that LAYOUT - and therefore every model ever saved - stays
-        # loadable. Restoring one means restoring its producer from git history.
         bomb_opt=BOMB_NONE,
         opponent=OPP_NONE,
         last_move=DIR_NONE,

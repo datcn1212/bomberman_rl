@@ -1,55 +1,45 @@
 # Tools
 
-Nine entry points. Four of them are what you use day to day; the rest are
-grouped by job so that this folder shows one file per task rather than one per
-script.
-
-## Daily
+Six scripts. `evaluate.py` is the library everything else calls; the rest are
+run from the command line.
 
 | | |
 |---|---|
+| `evaluate.py` | the measurement harness - protocol, metrics, registry. Not run directly |
 | `train.py` | run a curriculum over several seeds, then evaluate |
 | `eval_existing.py` | re-measure models already on disk, without retraining |
-| `audit_report.py` | check every figure in the report against the registry |
-| `verify_unchanged.py` | **before any agent-code change** - prove it alters nothing |
+| `audit_report.py` | check every figure in report_tabular_q.md against the registry |
+| `ship.py` | `choose`, `final`, `check` - see below |
 
-`train.py --exp-id NAME --phases classic:6000@rule_based_seeded --seeds 1 2 3`
-is the whole interface. Everything else is a flag on it.
+```
+python3 tools/train.py --exp-id NAME --phases classic:6000@rule_based_seeded --seeds 1 2 3
+python3 tools/ship.py check --agent linear_q
+```
 
-## Grouped
+Both agents work with all of these: pass `--agent linear_q`. The config
+environment variable each agent reads is looked up in
+`evaluate.py:CONFIG_ENV_VAR`, so an unregistered agent fails loudly instead of
+being silently run on its defaults.
 
-| | subcommands |
-|---|---|
-| `diagnose.py` | `policy` `bombs` `symmetry` `curves` |
-| `ship.py` | `select` `final` `gate` `check` `latency` |
-| `reference.py` | `baselines` `winrate` |
-
-Run as `python3 tools/ship.py check`. Implementations live in the matching
-folder and can be run directly too.
-
-`diagnose` is not called `inspect`: a module named `inspect.py` on sys.path
-shadows the standard library's, `dataclasses` imports that, and every tool here
-breaks with an error that points nowhere near the cause.
-
-## Library and one-offs
+## ship.py
 
 | | |
 |---|---|
-| `evaluate.py` | the measurement harness every other tool calls; not run directly |
-| `hpsearch.py` | random search with successive halving |
-| `phase0/` | `mechanics.py`, `events.py` - run once, before the agent existed |
+| `choose` | rank trained seeds on arenas 9101-9130, so the reported score comes from a block that had no say in the choice |
+| `final` | the decisive evaluation: EXACT mode, 600 rounds, one process per round |
+| `check` | the assignment's hard constraints, plus worst-case act() timing |
 
-## Two rules that the tools enforce
+## Two rules worth knowing
 
 **Measure against `rule_based_seeded`, not `rule_based_agent`.** Same agent,
-tie-breaks seeded from `OPP_SEED`, which `evaluate.py` sets to the arena seed
-and `train.py` to the training seed. A measurement then repeats exactly. The
-stock agent draws its tie-breaks from an unseeded `random` module - and one of
-those draws sits inside the breadth-first search it runs every step - which is
-where this project's entire noise floor came from. Keep the stock agent for the
-final check, since the tournament runs it.
+but its tie-breaks are seeded from `OPP_SEED`, which `evaluate.py` sets to the
+arena seed and `train.py` to the training seed, so a measurement repeats
+exactly. The stock agent draws tie-breaks from an unseeded `random` - and one
+of those draws sits inside the BFS it runs every step - which is where this
+project's whole noise floor came from. Keep the stock agent for the final
+check, because that is what the tournament runs.
 
-**Run `verify_unchanged.py` before trusting a refactor.** It trains a few
-hundred episodes twice under two configs and compares the tables entry by entry.
-It runs solo, because with unseeded opponents no two runs repeat and the
-comparison cannot conclude anything.
+**Don't name a tool after a stdlib module.** A file called `inspect.py` or
+`select.py` on sys.path shadows the real one, `dataclasses` and
+`concurrent.futures` import those, and every tool here breaks with an error
+pointing nowhere near the cause. That cost a day once.

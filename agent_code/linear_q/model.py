@@ -1,49 +1,17 @@
-"""The weight matrix and the vector that indexes it.
+"""Linear Q: Q(s, a) = phi(s) . w[:, a], plus the vectoriser that builds phi.
 
-Q(s, a) = phi(s) . w[:, a] - a linear approximator, replacing the tabular
-agent's dict-of-rows with a dense weight matrix shared across every state.
+Same observation as tabular_q (features.py is a copy), but instead of one table
+row per state we one-hot encode the categorical parts into a 33-dim vector and
+keep a weight matrix shared by every state. That is the whole difference
+between the two agents, which is what makes them comparable.
 
-phi(s) one-hot encodes every categorical component of the observation, adds
-one normalised scalar for target distance, and a bias term. Three slots the
-observation still carries - bomb_opt, opponent, last_move - are held at a
-constant value on this branch (see tabular_q/features.py, Phase 25), so
-one-hot encoding them would spend three weight rows on columns that are
-always 1 at index 0 and never move: dead weight, not dead code. They are left
-out of phi() rather than encoded uselessly, and adding them back is a
-one-line change if a later phase turns any of them back on.
+One thing the table gave us for free and this does not: with additive one-hot
+blocks, nothing forces "this direction is blocked" to outrank everything else,
+so a blocked move can come out on top. callbacks.act masks those out before
+choosing rather than hoping the weights learn it (Phase 1).
 
-Phase 1 found a greedy policy walking straight into a wall, forever: at one
-state Q(a blocked direction) was the highest of five legal actions, the move
-was invalid, the position did not change, and the identical state produced
-the identical choice for the rest of the episode. The first fix tried was an
-interaction feature, `target_dir points at a blocked neighbour`, on the
-theory that additive one-hot main effects cannot represent "blocked overrides
-everything else". That diagnosis of the *mechanism* was right but the
-specific trigger was wrong: `target_search` (features.py) only ever seeds its
-search from walkable neighbours, so target_dir can never point at a blocked
-tile - the feature's weight column stayed at exactly zero through 2000
-episodes because its precondition is unreachable, which is why training and
-evaluation reproduced bit-for-bit identical to the version without it. The
-actual failure was a blocked direction outscoring the others regardless of
-where the target pointed, which nothing this narrow could fix.
-
-The real fix is not a phi() feature: it is that a state whose Q-values were
-not yet trained enough to rank a wall correctly should never have been asked
-to. `callbacks.act` now excludes blocked directions from the candidate set
-before greedy or exploratory selection - the same mechanism BOMB already uses
-when `allow_bomb` is off, extended to run every step instead of once at
-setup. This does not remove anything the model has to learn: Q(blocked
-direction) is still computed and still updated by whatever transition
-actually visits it, it is only kept out of the *decision*, exactly as
-excluding BOMB never stopped the agent from having a Q-value for it.
-
-D4 canonicalisation is reused exactly as tabular_q established it: among the
-eight rotations and reflections, `canonical()` picks the same one it always
-would (smallest mixed-radix index under the relabelling), and phi() vectorises
-the *relabelled* observation rather than the raw one. The choice of frame is
-representation-independent - it only asks "which of eight equivalent views is
-canonical", never "how is the result stored" - so the exact function tabular_q
-tested is used unchanged; only what happens after picking the frame differs.
+D4 handling is the same idea as tabular_q's: pick a canonical frame, vectorise
+the relabelled observation, translate the chosen action back afterwards.
 """
 
 import pickle
@@ -53,30 +21,23 @@ import numpy as np
 from .features import ACTIONS, BLOCKED, DIR_HERE, DIR_NONE, observe
 
 N_ACTIONS = len(ACTIONS)
-FEATURE_VERSION = 3  # bumped: target_blocked removed (see module docstring)
+FEATURE_VERSION = 3
 
-# --- categorical component sizes -------------------------------------------
-# Four neighbours, each one of {blocked, free-safe, free-lethal}.
-N_MOVE_STATUS = 4 * 3
-N_T_HERE = 5          # 0..4
-N_TARGET_DIR = 6      # none, 4 directions, "already there"
-N_TARGET_KIND = 2      # crate, coin
-N_ESCAPE_DIR = 6      # none, 4 directions, "staying put is safe"
-
-# One normalised scalar (target_dist / cap) plus a bias term.
-N_CONTINUOUS = 1
+# sizes of the one-hot blocks
+N_MOVE_STATUS = 4 * 3     # 4 neighbours x {blocked, free-safe, free-lethal}
+N_T_HERE = 5
+N_TARGET_DIR = 6
+N_TARGET_KIND = 2
+N_ESCAPE_DIR = 6
+N_CONTINUOUS = 1          # target distance, normalised
 N_BIAS = 1
 
 PHI_DIM = (N_MOVE_STATUS + N_T_HERE + N_TARGET_DIR + N_TARGET_KIND
-          + N_ESCAPE_DIR + N_CONTINUOUS + N_BIAS)
+           + N_ESCAPE_DIR + N_CONTINUOUS + N_BIAS)
 
 _TARGET_DIST_CAP = 15.0
 
-
-# --- D4, reused from tabular_q's model.py -----------------------------------
-# DIRS is (UP, RIGHT, DOWN, LEFT). A 90-degree clockwise rotation sends
-# (dx, dy) -> (-dy, dx), mapping index i to (i + 1) % 4. A mirror in the
-# vertical axis fixes UP and DOWN and swaps RIGHT and LEFT.
+# D4, same construction as in tabular_q/model.py
 _ROT = (1, 2, 3, 0)
 _MIRROR = (0, 3, 2, 1)
 
@@ -86,7 +47,8 @@ def _compose(p, q):
 
 
 def _build_d4():
-    perms, rot = [], (0, 1, 2, 3)
+    perms = []
+    rot = (0, 1, 2, 3)
     for _ in range(4):
         perms.append(rot)
         perms.append(_compose(_MIRROR, rot))
@@ -99,18 +61,16 @@ IDENTITY = (0, 1, 2, 3)
 
 
 def _direction_index(perm, value):
-    """Relabel one direction-valued field; DIR_NONE and DIR_HERE carry no direction."""
+    """Relabel a direction field. DIR_NONE and DIR_HERE aren't directions."""
     return value if value in (DIR_NONE, DIR_HERE) else perm[value - 1] + 1
 
 
 def _tie_break_key(perm, obs):
-    """A total order over the eight relabelled views, for picking a canonical one.
+    """Orders the eight views so we can pick one deterministically.
 
-    Only used to compare views against each other - never stored, never used as
-    a table index - so any encoding that is total and deterministic works. This
-    one mirrors tabular_q's mixed-radix order exactly, which keeps the two
-    agents' notion of "canonical" identical and makes the D4 unit tests
-    transferable between them almost unchanged.
+    Any total order would do - this is never stored - but using tabular_q's
+    mixed-radix order means both agents call the same view canonical, so the
+    D4 tests carry over between them.
     """
     status = [0] * 4
     for i in range(4):
@@ -126,24 +86,19 @@ def _tie_break_key(perm, obs):
 
 
 def canonical_frame(obs):
-    """The D4 element reaching the canonical view of `obs`, and that view itself.
-
-    Returns (perm, relabelled_status, relabelled_target_dir, relabelled_escape_dir).
-    The caller vectorises the relabelled fields directly; `to_frame`/`from_frame`
-    translate a chosen action into and out of that frame, exactly as in
-    tabular_q.
-    """
+    """(perm, relabelled status, target_dir, escape_dir) for the canonical view."""
     best_key, best_perm = None, None
     for perm in D4:
         key = _tie_break_key(perm, obs)
         if best_key is None or key < best_key:
             best_key, best_perm = key, perm
+
     status = [0] * 4
     for i in range(4):
         status[best_perm[i]] = obs.move_status[i]
-    target_dir = _direction_index(best_perm, obs.target_dir)
-    escape_dir = _direction_index(best_perm, obs.escape_dir)
-    return best_perm, tuple(status), target_dir, escape_dir
+    return (best_perm, tuple(status),
+            _direction_index(best_perm, obs.target_dir),
+            _direction_index(best_perm, obs.escape_dir))
 
 
 def invert(perm):
@@ -154,16 +109,12 @@ def invert(perm):
 
 
 def to_frame(perm, action):
-    """Real action index -> its index in the canonical frame."""
     return perm[action] if action < 4 else action
 
 
 def from_frame(perm, action):
-    """Canonical-frame action index -> the real action index."""
     return invert(perm)[action] if action < 4 else action
 
-
-# --- vectorisation -----------------------------------------------------
 
 def _one_hot(index, size, out, offset):
     out[offset + index] = 1.0
@@ -171,41 +122,40 @@ def _one_hot(index, size, out, offset):
 
 
 def vectorize(move_status, t_here, target_dir, target_kind, escape_dir, target_dist):
-    """Pack the (already framed) categorical fields into phi(s)."""
+    """Build phi(s) from fields that are already in the canonical frame."""
     phi = np.zeros(PHI_DIM, dtype=np.float64)
-    # Each neighbour gets its own 3-wide block, not a shared one: neighbour i
-    # being blocked is a different fact from neighbour j being blocked, and a
-    # single shared one-hot would conflate "one side is open" across sides.
+
+    # each neighbour gets its own 3-wide block - "north is blocked" and "east is
+    # blocked" are different facts and a shared block would merge them
     offset = 0
     for i in range(4):
         phi[offset + move_status[i]] = 1.0
         offset += 3
+
     offset = _one_hot(t_here, N_T_HERE, phi, offset)
     offset = _one_hot(target_dir, N_TARGET_DIR, phi, offset)
     offset = _one_hot(target_kind, N_TARGET_KIND, phi, offset)
     offset = _one_hot(escape_dir, N_ESCAPE_DIR, phi, offset)
+
     phi[offset] = min(target_dist, _TARGET_DIST_CAP) / _TARGET_DIST_CAP
     offset += N_CONTINUOUS
-    phi[offset] = 1.0  # bias
+    phi[offset] = 1.0          # bias
     offset += N_BIAS
+
     assert offset == PHI_DIM
     return phi
 
 
 def observe_and_encode(game_state, use_symmetry):
-    """The observation, its feature vector, the frame it was vectorised in, and
-    the move_status *in that same frame*.
+    """Returns (phi, obs, perm, status).
 
-    `status` is returned separately from `obs` because `obs.move_status` is the
-    raw, unrotated field: with symmetry on, the Q-values in `phi` are indexed by
-    canonical-frame directions, so a caller that wants to know which of *those*
-    four directions is blocked - to keep a decision from choosing one, for
-    instance - needs the relabelled version, not the raw one.
+    status is handed back separately because obs.move_status is the raw,
+    unrotated field, while phi (and therefore the Q values) is indexed by
+    canonical-frame directions. A caller that wants to know which of *those*
+    directions is blocked needs the relabelled version.
 
-    Mirrors tabular_q's function of the same name and same contract: not
-    memoised, for the same reason (Phase 25.4 in the tabular_q report - the
-    framework labels the state before and after an action with the same step
-    number, so caching on it returns a stale danger schedule).
+    Not cached, same reason as tabular_q: the state before and after an action
+    share a step number, so caching on it serves a stale danger schedule.
     """
     obs = observe(game_state)
     if use_symmetry:
@@ -213,6 +163,7 @@ def observe_and_encode(game_state, use_symmetry):
     else:
         perm = IDENTITY
         status, target_dir, escape_dir = obs.move_status, obs.target_dir, obs.escape_dir
+
     phi = vectorize(status, obs.t_here, target_dir, obs.target_kind, escape_dir,
                     obs.target_dist)
     return phi, obs, perm, status
@@ -224,27 +175,18 @@ class LinearQModel:
         self.feature_version = FEATURE_VERSION
         self.feature_flags = dict(feature_flags or {})
         self.w = np.zeros((PHI_DIM, N_ACTIONS), dtype=np.float64)
-        # How many times weight w[i, a] has actually been moved: a feature
-        # touches only the entries where phi[i] != 0, so this is counted per
-        # (feature, action) rather than per update call. Read by
-        # effective_alpha() under "visit"; always maintained, even under
-        # "constant", so switching schedules mid-experiment costs nothing.
+        # How often w[i, a] actually moved. An update only touches entries where
+        # phi[i] != 0, so this counts per (feature, action), not per call.
         self.visits = np.zeros((PHI_DIM, N_ACTIONS), dtype=np.int64)
 
     def values(self, phi):
         return phi @ self.w
 
     def update(self, phi, action, target, alpha):
-        """One semi-gradient TD step: w[:, a] += alpha * delta * phi.
+        """Semi-gradient TD step: w[:, a] += alpha * delta * phi.
 
-        Every feature active in `phi` moves, not one table cell - which is the
-        entire point of function approximation and also the entire mechanism by
-        which a bad step size or a bad feature scale can make Q diverge, since
-        a single update now touches every state that shares a feature.
-
-        `alpha` may be a scalar or a (PHI_DIM,) array - effective_alpha()
-        decides which - and broadcasting handles either without this method
-        needing to know.
+        Every active feature moves, not one cell. alpha may be a scalar or a
+        (PHI_DIM,) array - broadcasting covers both.
         """
         delta = target - float(phi @ self.w[:, action])
         active = phi != 0
@@ -252,17 +194,11 @@ class LinearQModel:
         self.visits[active, action] += 1
 
     def effective_alpha(self, phi, action, cfg):
-        """Step size for one update, one entry per active feature.
+        """alpha / (1 + n/half_life), one value per feature.
 
-        Mirrors tabular_q's per-(state, action) decay, alpha / (1 + n/half_life)
-        - the same Robbins-Monro shape, Phase 2 of that report - but counted at
-        the grain this representation actually has: a weight is shared by every
-        state with that feature active, not owned by one state, so n has to be
-        the number of times *this weight entry* has moved, not how many times a
-        state has been seen. Phase 1.4 measured what "constant" (n has no
-        effect) does instead: weight_norm never settles, only wanders inside a
-        band, so an eval score reports whichever point of that drift a run
-        happened to stop on.
+        Same Robbins-Monro shape as tabular_q, but n counts updates of this
+        weight entry, not of a state - a weight is shared by every state whose
+        feature is active. Constant alpha never settles (Phase 1.4).
         """
         if cfg.alpha_schedule == "constant":
             return cfg.alpha
@@ -281,8 +217,7 @@ class LinearQModel:
             model = pickle.load(fh)
         if model.phi_dim != PHI_DIM or model.feature_version != FEATURE_VERSION:
             raise ValueError(
-                "model at %s was trained with phi_dim/version (%d, %d) but this "
-                "code expects (%d, %d); loading it would silently mix incompatible "
-                "weight columns" % (path, model.phi_dim, model.feature_version,
-                                    PHI_DIM, FEATURE_VERSION))
+                "model at %s has phi_dim/version (%d, %d), code expects (%d, %d); "
+                "loading it would mix incompatible weight columns"
+                % (path, model.phi_dim, model.feature_version, PHI_DIM, FEATURE_VERSION))
         return model

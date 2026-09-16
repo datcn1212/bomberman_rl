@@ -1,0 +1,18 @@
+{
+  "alpha": 0.2,
+  "continue_from": null,
+  "eps_decay_episodes": 16,
+  "exploration": "max_boltzmann",
+  "gamma": 0.95,
+  "log_path": null,
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/smoke_sarsa_nosym/seed1/model.pkl",
+  "reward_bomb_no_escape": -1.0,
+  "reward_step": 0.0,
+  "reward_trapped": -1.0,
+  "shaping_distance_cap": 12,
+  "shaping_weight": 0.15,
+  "target": "sarsa",
+  "temperature": 0.5,
+  "use_bomb_opt": true,
+  "use_symmetry": false
+}

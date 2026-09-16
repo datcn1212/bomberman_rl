@@ -1,17 +1,15 @@
-"""Q-learning update, driven by the framework's training callbacks.
+"""Training callbacks: the Q-learning update itself.
 
-The delivery pattern was measured in Phase 0 (tools/verify_events.py) and
-dictates the structure here:
+One quirk of the framework shapes this whole file (measured in Phase 0):
 
-  * when the agent survives, the last step arrives twice -- once through
-    `game_events_occurred` and once through `end_of_round`, the second time with
-    SURVIVED_ROUND attached;
-  * when the agent dies, the fatal step arrives *only* through `end_of_round`.
+  - if the agent survives, the last step arrives twice, once through
+    game_events_occurred and again through end_of_round with SURVIVED_ROUND;
+  - if it dies, the fatal step arrives only through end_of_round.
 
-So transitions are staged rather than learned on arrival. A staged transition is
-flushed when the next one shows up, and `end_of_round` either replaces it (same
-step number -- it is the re-delivery) or flushes it first (different step number
--- the agent died and this is a genuinely new transition).
+So we stage a transition instead of learning on arrival, and flush it when the
+next one turns up. end_of_round either replaces the staged one (same step
+number = it's the re-delivery) or flushes it first (different step = the agent
+died and this is a new transition).
 """
 
 import csv
@@ -27,9 +25,11 @@ from .model import observe_and_encode, to_frame
 
 
 class Transition:
-    __slots__ = ("step", "state", "action", "reward", "next_state", "terminal", "coins", "crates", "bombs")
+    __slots__ = ("step", "state", "action", "reward", "next_state", "terminal",
+                 "coins", "crates", "bombs")
 
-    def __init__(self, step, state, action, reward, next_state, terminal, coins, crates, bombs):
+    def __init__(self, step, state, action, reward, next_state, terminal,
+                 coins, crates, bombs):
         self.step = step
         self.state = state
         self.action = action
@@ -42,20 +42,18 @@ class Transition:
 
 
 def setup_training(self):
-    # Recorded on the model so it can never be evaluated with a different
-    # observation, or a different frame, than it was trained with.
+    # Store the flags on the model so it can't later be evaluated with a
+    # different observation than it was trained with.
     self.model.feature_flags = dict(features.FLAGS)
     self.model.feature_flags["use_symmetry"] = self.cfg.use_symmetry
+
     if self.cfg.n_step > 1 and self.cfg.td_lambda > 0.0:
-        raise ValueError(
-            "n_step and td_lambda are two answers to the same question; "
-            "set one of them, not both")
+        raise ValueError("n_step and td_lambda solve the same problem; pick one")
+
     self.episode = 0
     self.pending = None
-    # n-step returns wait here until the window is full. Q(lambda) does not use
-    # it; the trace dictionary carries the same information incrementally.
-    self.buffer = deque()
-    self.traces = {}
+    self.buffer = deque()      # n-step window
+    self.traces = {}           # Q(lambda) eligibility traces
     self.action_was_greedy = True
     self.episode_reward = 0.0
     self.episode_coins = 0
@@ -65,11 +63,10 @@ def setup_training(self):
 
 
 def _potential(self, obs):
-    """Phi(s) = -w * distance to the nearest target.
+    """Phi(s) = -w * distance to nearest target, capped.
 
-    Capped so that "no target reachable" and "target very far" are the same
-    value; an unbounded potential would make the shaping term jump whenever the
-    last coin on a board is collected.
+    The cap makes "no target" and "target very far" the same value, otherwise
+    the shaping term jumps when the last coin gets collected.
     """
     if not self.cfg.shaping_weight:
         return 0.0
@@ -80,11 +77,10 @@ def _potential(self, obs):
 
 
 def _wasted_bomb(old_game_state, events):
-    """True when the agent dropped a bomb whose blast covers no crate.
+    """Bomb dropped whose blast hits no crate.
 
-    Evaluated on the state the bomb was dropped from, so the penalty lands on
-    the transition that made the decision rather than four steps later, where
-    Phase 4 showed it cannot be attributed.
+    Checked on the state we bombed from, so the penalty lands on the decision
+    and not four steps later where it can't be attributed any more (Phase 4).
     """
     if e.BOMB_DROPPED not in events:
         return False
@@ -92,12 +88,10 @@ def _wasted_bomb(old_game_state, events):
 
 
 def _is_trapped(game_state):
-    """Standing inside a blast schedule with no surviving move."""
     return Board(game_state).escape_search() == DIR_NONE
 
 
 def _bomb_without_escape(old_game_state, events):
-    """A bomb was dropped and nothing survives the blast it creates."""
     if e.BOMB_DROPPED not in events:
         return False
     pos = old_game_state["self"][3]
@@ -105,11 +99,10 @@ def _bomb_without_escape(old_game_state, events):
 
 
 def reward_from(self, events, old_game_state=None):
-    """Map a step's events onto a scalar reward.
+    """Scalar reward for one step's events.
 
-    Crates and revealed coins are counted per occurrence, because one
-    well-placed bomb can destroy several at once and a flat bonus would make a
-    bomb that clears one crate worth as much as a bomb that clears four.
+    Crates and revealed coins count per occurrence - one good bomb can clear
+    four crates, and a flat bonus would price that the same as clearing one.
     """
     cfg = self.cfg
     reward = cfg.reward_step
@@ -117,6 +110,7 @@ def reward_from(self, events, old_game_state=None):
     reward += cfg.reward_kill * events.count(e.KILLED_OPPONENT)
     reward += cfg.reward_crate * events.count(e.CRATE_DESTROYED)
     reward += cfg.reward_coin_found * events.count(e.COIN_FOUND)
+
     if e.INVALID_ACTION in events:
         reward += cfg.reward_invalid
     if e.WAITED in events:
@@ -124,11 +118,12 @@ def reward_from(self, events, old_game_state=None):
     if e.KILLED_SELF in events:
         reward += cfg.reward_killed_self
     elif e.GOT_KILLED in events:
-        # KILLED_SELF always comes with GOT_KILLED; charging both would double
-        # the penalty for suicide relative to being killed by someone else.
+        # KILLED_SELF always comes with GOT_KILLED, so this is elif: otherwise
+        # suicide costs double what being killed by someone else costs.
         reward += cfg.reward_got_killed
     if e.SURVIVED_ROUND in events:
         reward += cfg.reward_survived
+
     if old_game_state is not None:
         if _wasted_bomb(old_game_state, events):
             reward += cfg.reward_bomb_wasted
@@ -140,24 +135,23 @@ def reward_from(self, events, old_game_state=None):
 
 
 def _best_next(self, state):
-    """Bootstrap value of a state: max over *legal* actions only.
+    """max Q over legal actions only.
 
-    With BOMB masked out its row stays at zero, and a plain max would bootstrap
-    from that zero whenever every legal action is worth less -- an optimistic
-    target for an action the agent is not even allowed to take.
+    With BOMB masked its column stays zero, and a plain max would bootstrap off
+    that zero whenever the legal actions are all worth less.
     """
     return float(np.max(self.model.values(state)[self.legal]))
 
 
 def _flush(self):
-    """Hand the staged transition to whichever update rule is configured."""
+    """Send the staged transition to whichever update rule is configured."""
     t = self.pending
     self.pending = None
     if t is None:
         return
-    # Episode statistics are accumulated here rather than where the callback
-    # arrives, so that a transition dropped as a re-delivery is not counted.
-    # Counting on arrival is what makes a 50-coin board report 51 coins.
+
+    # Stats are counted here, not on arrival, so a transition we drop as a
+    # re-delivery isn't counted twice (that's what made 50-coin boards log 51).
     self.episode_reward += t.reward
     self.episode_coins += t.coins
     self.episode_crates += t.crates
@@ -169,8 +163,8 @@ def _flush(self):
 
     self.buffer.append(t)
     if t.terminal:
-        # The episode is over, so every transition still waiting gets the
-        # shortest return that is available to it rather than none at all.
+        # Episode over: give everything still waiting the shortest return it
+        # can get rather than no update at all.
         while self.buffer:
             _apply_n_step(self)
     elif len(self.buffer) >= self.cfg.n_step:
@@ -178,17 +172,14 @@ def _flush(self):
 
 
 def _apply_n_step(self):
-    """Update the oldest buffered transition from the window that follows it.
+    """Update the oldest buffered transition using the window after it.
 
-    G = r_0 + gamma r_1 + ... + gamma^(k-1) r_(k-1) + gamma^k max_a Q(s_k, a),
-    truncated at the terminal transition when one falls inside the window. With
-    n_step = 1 this is exactly one-step Q-learning, which is what keeps the
-    default byte-identical to what came before.
+    G = r0 + gamma*r1 + ... + gamma^(k-1)*r(k-1) + gamma^k * max_a Q(sk, a),
+    cut short if a terminal transition falls inside the window. n_step = 1 is
+    ordinary one-step Q-learning.
 
-    The intermediate actions are not corrected for being off-policy. That is the
-    usual practical choice, and the bias it introduces is bounded by how often
-    exploration fires inside a window of n steps; Q(lambda) is the arm that
-    handles the same problem the principled way.
+    The intermediate actions aren't importance-corrected. That's the usual
+    shortcut; Q(lambda) is the arm that handles it properly.
     """
     g = 0.0
     discount = 1.0
@@ -211,42 +202,38 @@ def _apply_n_step(self):
 
 
 def _lambda_update(self, t):
-    """One step of Watkins's Q(lambda) with replacing traces.
+    """Watkins Q(lambda), replacing traces.
 
-    The trace decay belongs after the update and depends on whether the *next*
-    action is greedy. By the time a transition reaches here the framework has
-    already asked for that next action, so `self.action_was_greedy` is exactly
-    the flag the algorithm wants.
+    Decay happens after the update and depends on whether the *next* action was
+    greedy. The framework has already asked for that action by the time we get
+    here, so self.action_was_greedy is the flag we want.
     """
     cfg = self.cfg
-    self.traces[(t.state, t.action)] = 1.0      # replacing trace
+    self.traces[(t.state, t.action)] = 1.0
 
     q_sa = float(self.model.values(t.state)[t.action])
     target = t.reward if t.terminal else t.reward + cfg.gamma * _best_next(self, t.next_state)
     delta = target - q_sa
 
-    # Every traced pair is stepped by *its own* alpha, not by the alpha of the
-    # pair that happens to be visited now. Sharing one alpha lets a pair seen
-    # ten thousand times - whose own step size has long since decayed - keep
-    # taking full-sized steps borrowed from some freshly discovered state, which
-    # breaks the Robbins-Monro condition the visit schedule exists to satisfy
-    # and sends Q to NaN a few thousand episodes in.
+    # Each traced pair steps with its own alpha. Sharing the visited pair's
+    # alpha lets a pair seen 10k times take full-size steps borrowed from some
+    # fresh state - that breaks the Robbins-Monro condition and sent Q to NaN.
     for (state, action), trace in self.traces.items():
         alpha = self.model.effective_alpha(state, action, cfg)
         self.model.add(state, action, alpha * delta * trace)
-    # Counted after the updates, matching the one-step path where the step size
-    # is read before `update` increments the counter.
+    # After the updates, matching the one-step path where alpha is read before
+    # update() bumps the counter.
     self.model.note_visit(t.state, t.action)
 
     if t.terminal:
         self.traces.clear()
         return
     if not self.action_was_greedy:
-        # Watkins cuts here: beyond a non-greedy action the return no longer
-        # estimates the greedy policy, so carrying the trace further would
-        # credit states for a path the target policy would not have taken.
+        # Watkins cuts here: past a non-greedy action the return no longer
+        # estimates the greedy policy.
         self.traces.clear()
         return
+
     decay = cfg.gamma * cfg.td_lambda
     floor = cfg.trace_floor
     self.traces = {k: v * decay for k, v in self.traces.items() if v * decay > floor}
@@ -256,11 +243,11 @@ def game_events_occurred(self, old_game_state, self_action, new_game_state, even
     if old_game_state is None or self_action is None:
         return
     _flush(self)
-    old_index, old_obs, old_perm = observe_and_encode(
-        old_game_state, self.cfg.use_symmetry)
-    new_index, new_obs, _ = observe_and_encode(
-        new_game_state, self.cfg.use_symmetry)
+
+    old_index, old_obs, old_perm = observe_and_encode(old_game_state, self.cfg.use_symmetry)
+    new_index, new_obs, _ = observe_and_encode(new_game_state, self.cfg.use_symmetry)
     shaping = (self.cfg.gamma * _potential(self, new_obs)) - _potential(self, old_obs)
+
     self.pending = Transition(
         step=old_game_state["step"],
         state=old_index,
@@ -277,15 +264,15 @@ def game_events_occurred(self, old_game_state, self_action, new_game_state, even
 def end_of_round(self, last_game_state, last_action, events):
     if last_action is not None:
         if self.pending is not None and self.pending.step == last_game_state["step"]:
-            # Re-delivery of a step already staged: keep the end_of_round
-            # version, which carries the complete event list.
+            # Same step already staged: this is the re-delivery, and the
+            # end_of_round copy has the full event list, so keep that one.
             self.pending = None
         else:
             _flush(self)
-        # Terminal transition: Ng et al. require Phi(terminal) = 0 for the
-        # policy-invariance guarantee, so the shaping term is just -Phi(s).
+
         last_index, last_obs, last_perm = observe_and_encode(
             last_game_state, self.cfg.use_symmetry)
+        # Ng et al. need Phi(terminal) = 0, so the shaping term here is -Phi(s).
         self.pending = Transition(
             step=last_game_state["step"],
             state=last_index,
@@ -299,10 +286,10 @@ def end_of_round(self, last_game_state, last_action, events):
         )
         _flush(self)
 
-    # Nothing may survive into the next episode: a trace or a half-filled window
-    # would credit the first states of the new round with the last round's
-    # reward. `last_action is None` is the one path that stages no terminal
-    # transition, so the drain here is not always a no-op.
+    # Nothing may carry into the next episode: a leftover trace or half-full
+    # window would credit the new round's first states with the old round's
+    # reward. When last_action is None nothing terminal was staged, so this
+    # drain isn't always a no-op.
     while self.buffer:
         _apply_n_step(self)
     self.traces.clear()
@@ -332,6 +319,7 @@ def _log_episode(self, last_game_state, events):
     if self.cfg.trace_state >= 0:
         row = self.model.values(self.cfg.trace_state)
         trace = {"q_%s" % ACTIONS[i]: round(float(row[i]), 5) for i in range(len(ACTIONS))}
+
     self.log_rows.append({
         "episode": self.episode,
         "steps": last_game_state["step"] if last_game_state else 0,

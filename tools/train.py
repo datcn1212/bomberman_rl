@@ -1,18 +1,16 @@
-"""Training driver: runs a curriculum of phases for several seeds in parallel,
-then evaluates the result under the standard protocol.
+"""Training driver: run a curriculum for several seeds in parallel, then
+evaluate under the standard protocol.
 
-A phase is written `scenario:episodes[@opponent+opponent]`, and phases chain by
-warm-starting each one from the model the previous phase left behind:
+A phase is `scenario:episodes[@opponent+opponent]`, and phases chain by
+warm-starting each one from the model the previous phase produced:
 
-    python3 tools/train.py --exp-id p1_minimal \\
-        --phases coin-heaven:2000 --seeds 1 2 3
+    python3 tools/train.py --exp-id p1_minimal --phases coin-heaven:2000 --seeds 1 2 3
 
-Training may use several processes (the ban on multiprocessing applies to the
-submitted agent, not to the experiment harness); the agent itself never does.
+The multiprocessing ban applies to the submitted agent, not to this harness -
+the agent itself never forks.
 
-Everything a run needs to be reproduced is written to
-experiments/<exp_id>/seed<k>/: the exact config of each phase, the per-episode
-training log, and the model.
+Everything needed to reproduce a run lands in experiments/<exp_id>/seed<k>/:
+the config of each phase, the per-episode log, and the model.
 """
 
 import argparse
@@ -33,12 +31,16 @@ from tools.evaluate import (EVAL_SEEDS, config_env_var, evaluate,  # noqa: E402
 
 EXPERIMENTS = ROOT / "experiments"
 
+# Disjoint from EVAL_SEEDS (9001..9030), so nothing is ever reported on an
+# arena the agent trained on.
+TRAIN_SEED_BASE = 1000
+
 
 def code_fingerprint(agent):
-    """Commit of the agent code, plus a dirty marker.
+    """Commit the agent code was at, with a +dirty marker.
 
-    Stamped into every phase config so that two runs can never be compared
-    without it being visible that they were produced by different code.
+    Written into every phase config so two runs can't be compared without it
+    being visible that different code produced them.
     """
     try:
         head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT,
@@ -49,13 +51,10 @@ def code_fingerprint(agent):
     except Exception:
         return "unknown"
     return head + ("+dirty" if dirty else "")
-# Training seeds are drawn from a range disjoint from EVAL_SEEDS (9001..9030),
-# so no result is ever reported on an arena the agent trained on.
-TRAIN_SEED_BASE = 1000
 
 
 def parse_phase(spec):
-    """`scenario:episodes[@opponent+opponent]` -> (scenario, episodes, [opponents])."""
+    """`scenario:episodes[@opp+opp]` -> (scenario, episodes, [opponents])."""
     head, _, opponents = spec.partition("@")
     scenario, _, episodes = head.partition(":")
     if not episodes:
@@ -72,10 +71,11 @@ def run_seed(job):
     previous = None
     model_path = None
     for phase_index, (scenario, episodes, opponents) in enumerate(phases):
-        # One checkpoint per phase rather than one per seed: overwriting a single
-        # file makes the intermediate model unavailable, and "did the skill
-        # survive the next phase" is exactly the question a curriculum raises.
+        # A checkpoint per phase, not one per seed: "did the skill survive the
+        # next phase" is exactly what a curriculum makes you ask, and
+        # overwriting one file destroys the evidence.
         model_path = seed_dir / ("model_phase%d.pkl" % phase_index)
+
         cfg = dict(overrides)
         if phase_index < len(phase_overrides):
             cfg.update(phase_overrides[phase_index])
@@ -95,17 +95,17 @@ def run_seed(job):
                "--n-rounds", str(episodes),
                "--seed", str(TRAIN_SEED_BASE + seed_index)]
         if full_rounds:
-            # Without this the engine ends the round the moment our agent dies,
-            # so a policy that dies early produces a 30-step episode while a
-            # passive one produces 400 steps. The learner then sees far more
-            # passive transitions than bombing ones, which is self-reinforcing.
+            # Otherwise the round ends the moment we die, so a reckless policy
+            # generates 30-step episodes and a passive one 400. The learner
+            # then sees mostly passive transitions, which reinforces itself.
             cmd.append("--continue-without-training")
-        # Training faces a seeded opponent too, so a run repeats. OPP_SEED is
-        # derived from the training seed, so each of the ten seeds meets a
-        # different but reproducible opponent rather than all ten meeting the
-        # same one. Ignored by the stock `rule_based_agent`.
+
+        # Seeded opponent during training too, so a run repeats. Deriving
+        # OPP_SEED from the training seed means the ten seeds face ten
+        # different but reproducible opponents, not the same one ten times.
         env = dict(os.environ, **{config_env_var(args_agent): str(config_path)},
                    OPP_SEED=str(TRAIN_SEED_BASE + seed_index))
+
         started = time.time()
         proc = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True, text=True)
         if proc.returncode != 0:
@@ -116,11 +116,29 @@ def run_seed(job):
             print("  %s seed%d phase%d (%s x%d) %.0fs"
                   % (exp_id, seed_index, phase_index, scenario, episodes,
                      time.time() - started), flush=True)
-        # Each phase continues the model the previous one produced.
         previous = model_path
+
     final = seed_dir / "model.pkl"
     shutil.copyfile(model_path, final)
     return str(final)
+
+
+def _eval_config(exp_id, seed, model_path, overrides):
+    """Config used at evaluation time.
+
+    Learning parameters don't matter here (act() is greedy when self.train is
+    False), but the overrides are still carried over: some of them change what
+    the agent *observes*, and evaluating a model on a different observation
+    than it trained on measures the wrong thing without any error.
+    """
+    seed_dir = EXPERIMENTS / exp_id / ("seed%d" % seed)
+    cfg = dict(overrides)
+    cfg["model_path"] = str(model_path)
+    cfg["continue_from"] = None
+    cfg["log_path"] = None
+    path = seed_dir / "eval_config.json"
+    path.write_text(json.dumps(cfg, indent=2, sort_keys=True))
+    return str(path)
 
 
 def main():
@@ -130,25 +148,19 @@ def main():
     parser.add_argument("--phases", nargs="+", required=True,
                         help="scenario:episodes[@opp+opp], applied in order")
     parser.add_argument("--seeds", type=int, nargs="+", default=[1, 2, 3])
-    parser.add_argument("--overrides", default="{}",
-                        help="JSON of config.py keys to override")
+    parser.add_argument("--overrides", default="{}", help="JSON of config keys")
     parser.add_argument("--phase-overrides", default="[]",
-                        help="JSON list, one object per phase, applied on top of "
-                             "--overrides. Mainly for eps_start: a warm-started "
-                             "phase that restarts exploration at 1.0 throws away "
-                             "the model it was given.")
+                        help="JSON list, one object per phase, on top of --overrides. "
+                             "Mostly for eps_start: a warm-started phase that "
+                             "restarts exploration at 1.0 throws the model away.")
     parser.add_argument("--eval-scenario", default=None)
     parser.add_argument("--eval-opponents", nargs="*", default=[])
     parser.add_argument("--eval-mode", default="fast", choices=["fast", "exact"])
     parser.add_argument("--eval-rounds", type=int, default=20)
     parser.add_argument("--eval-seeds", type=int, default=len(EVAL_SEEDS))
     parser.add_argument("--full-rounds", action="store_true",
-                        help="pass --continue-without-training so rounds are not "
-                             "cut short when our agent dies")
-    parser.add_argument("--workers", type=int, default=3,
-                        help="training processes; one per seed removes a whole "
-                             "scheduling round, and single-threaded jobs tolerate "
-                             "mild oversubscription")
+                        help="don't cut rounds short when our agent dies")
+    parser.add_argument("--workers", type=int, default=3)
     parser.add_argument("--eval-workers", type=int, default=4)
     parser.add_argument("--note", default="")
     args = parser.parse_args()
@@ -162,6 +174,7 @@ def main():
 
     fingerprint = code_fingerprint(args.agent)
     print("agent code at %s" % fingerprint, flush=True)
+
     jobs = [(args.exp_id, seed, phases, overrides, phase_overrides,
              args.full_rounds, False, args.agent, fingerprint)
             for seed in args.seeds]
@@ -178,7 +191,7 @@ def main():
             args.agent, args.eval_opponents, eval_scenario, mode=args.eval_mode,
             seeds=EVAL_SEEDS[:args.eval_seeds], n_rounds=args.eval_rounds, tag=tag,
             extra_env={config_env_var(args.agent):
-                      _eval_config(args.exp_id, seed, model_path, overrides)},
+                       _eval_config(args.exp_id, seed, model_path, overrides)},
             workers=args.eval_workers)
         print(format_metrics(metrics), flush=True)
         register(metrics, exp_id=tag, note=args.note)
@@ -192,25 +205,6 @@ def main():
         spread = max(values) - min(values)
         print("  %-14s %.3f   (per seed: %s, spread %.3f)"
               % (key, mean, ", ".join("%.3f" % v for v in values), spread))
-
-
-def _eval_config(exp_id, seed, model_path, overrides):
-    """Config used at evaluation time.
-
-    Learning parameters are irrelevant here because act() is greedy when
-    self.train is False, but the overrides are still carried over: some of them
-    (use_opponents, for one) change what the agent *observes*, and evaluating a
-    model with a different observation than it trained on would silently measure
-    the wrong thing.
-    """
-    seed_dir = EXPERIMENTS / exp_id / ("seed%d" % seed)
-    cfg = dict(overrides)
-    cfg["model_path"] = str(model_path)
-    cfg["continue_from"] = None
-    cfg["log_path"] = None
-    path = seed_dir / "eval_config.json"
-    path.write_text(json.dumps(cfg, indent=2, sort_keys=True))
-    return str(path)
 
 
 if __name__ == "__main__":

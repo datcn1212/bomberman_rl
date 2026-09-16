@@ -1,0 +1,21 @@
+{
+  "alpha": 0.2,
+  "continue_from": null,
+  "eps_decay_episodes": 16,
+  "exploration": "max_boltzmann",
+  "gamma": 0.95,
+  "git_commit": "005bb3b",
+  "log_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/smoke_sarsa_nosym/seed1/phase0_classic.csv",
+  "model_path": "/Users/canada2k1/Documents/_DaCS/MLE/final project/bomberman_rl/experiments/smoke_sarsa_nosym/seed1/model_phase0.pkl",
+  "n_episodes": 20,
+  "reward_bomb_no_escape": -1.0,
+  "reward_step": 0.0,
+  "reward_trapped": -1.0,
+  "seed": 1097,
+  "shaping_distance_cap": 12,
+  "shaping_weight": 0.15,
+  "target": "sarsa",
+  "temperature": 0.5,
+  "use_bomb_opt": true,
+  "use_symmetry": false
+}

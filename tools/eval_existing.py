@@ -1,10 +1,10 @@
-"""Evaluate models that are already on disk.
+"""Re-evaluate models that are already on disk.
 
-Training and evaluation are separate costs, and only evaluation is cheap. When a
-run dies in its evaluation phase the trained models are still there, so this
-re-runs just the measurement instead of the whole experiment.
+Training is the expensive half; evaluation is cheap. When a run dies during
+evaluation the trained models are still there, so this repeats just the
+measurement instead of the whole experiment.
 
-    python3 tools/eval_existing.py --exp-id p13_no_sym \\
+    python3 tools/eval_existing.py --exp-id p13_no_sym \
         --overrides '{"gamma": 0.999, "exploration": "max_boltzmann"}'
 """
 
@@ -45,6 +45,9 @@ def main():
         if not model_path.is_file():
             print("  seed %d: no model, skipped" % seed, flush=True)
             continue
+
+        # Overrides are carried over because some of them change what the agent
+        # observes; a model must be evaluated on the observation it trained on.
         cfg = dict(overrides)
         cfg["model_path"] = str(model_path)
         cfg["continue_from"] = None
@@ -55,7 +58,8 @@ def main():
         tag = "%s_seed%d" % (args.exp_id, seed)
         metrics = evaluate(args.agent, args.opponents, args.scenario,
                            mode=args.mode, seeds=EVAL_SEEDS, n_rounds=args.rounds,
-                           tag=tag, extra_env={config_env_var(args.agent): str(cfg_path)},
+                           tag=tag,
+                           extra_env={config_env_var(args.agent): str(cfg_path)},
                            workers=args.workers)
         print(format_metrics(metrics), flush=True)
         register(metrics, exp_id=tag, note=args.note)

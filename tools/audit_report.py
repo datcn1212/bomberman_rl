@@ -1,21 +1,18 @@
-"""Check that every number quoted in the report is still what the data says.
+"""Check that the numbers quoted in report_tabular_q.md still match the data.
 
-A log this long accumulates numbers that were correct when written and then
-stopped being correct - a run was repeated, a conclusion was re-graded, a
-configuration changed underneath. This re-derives the headline figures and
-compares them against the report text, so a stale number is found by a script
-rather than by a reader.
+A log this long collects figures that were right when written and stopped being
+right later - a run got repeated, a config changed underneath. This re-derives
+the headline numbers from the registry so a script catches a stale one instead
+of a reader.
 
-Figures come from `experiments/registry.csv`, which is committed alongside the
-models. An earlier version read the per-run logs instead; those live under
-`results/`, which is not tracked, so every check silently turned into a SKIP and
-the tool reported success while verifying nothing. A check that cannot run is
-now a failure, not a pass.
+Numbers come from experiments/registry.csv, which is committed. An earlier
+version read per-run logs under results/, which isn't tracked, so every check
+quietly turned into a SKIP and the tool reported success while verifying
+nothing. A check that can't run now counts as a failure.
 
-An experiment id is not enough to identify a measurement: the same models are
-often measured both 1v1 and on the four-agent board, and those rows sit side by
-side in the registry. Each claim therefore names the number of opponents it was
-measured against.
+An exp id alone doesn't identify a measurement - the same models are often
+measured 1v1 and four-agent, and both rows sit in the registry - so each claim
+also says how many opponents it was measured against.
 
     python3 tools/audit_report.py
 """
@@ -31,7 +28,7 @@ ROOT = Path(__file__).resolve().parent.parent
 REPORT = ROOT / "report_tabular_q.md"
 REGISTRY = ROOT / "experiments" / "registry.csv"
 
-# (label, experiment id, opponents on the board, metric, value quoted)
+# (label, exp id, number of opponents, metric, value quoted in the report)
 CLAIMS = [
     ("Phase 10 gamma 0.9",              "p9_direct",       0, "mean_coins", 1.54),
     ("Phase 10 gamma 0.99",             "p10_g99",         0, "mean_coins", 4.86),
@@ -58,7 +55,7 @@ CLAIMS = [
     ("Phase 27 lambda=0.9",             "p27_lam090",      3, "mean_score", 1.857),
 ]
 
-# The three runs of one identical configuration that size the noise floor.
+# Three runs of one identical config; their spread is the noise floor.
 REPEATS = ["p19b_6000ep", "final_tabular_q", "repeat_c"]
 
 TOLERANCE = 0.05
@@ -72,18 +69,18 @@ def load_registry():
 
 
 def per_seed(rows, exp_id, opponents, key):
-    """Every seed's value for one experiment measured against `opponents` foes.
+    """Per-seed values for one experiment at a given number of opponents.
 
-    Later rows win: re-measuring an experiment appends rather than overwrites,
-    and the most recent measurement is the one the report should be quoting.
+    Later rows win: re-measuring appends instead of overwriting, and the newest
+    measurement is the one the report should quote.
     """
     latest = {}
     for row in rows:
         if not re.fullmatch(re.escape(exp_id) + r"_seed\d+", row["exp_id"]):
             continue
-        # Counts both `rule_based_agent` and `rule_based_seeded`: from Phase 26
-        # the opponent is the seeded variant, and the two were measured to be
-        # interchangeable (paired t = -0.13), so they index the same setting.
+        # Counts rule_based_agent and rule_based_seeded alike: from Phase 26 on
+        # we used the seeded variant, and the two measured interchangeable
+        # (paired t = -0.13), so they index the same setting.
         if row["opponents"].count("rule_based") != opponents:
             continue
         if row[key] in ("", "nan"):
@@ -95,12 +92,12 @@ def per_seed(rows, exp_id, opponents, key):
 def main():
     report = REPORT.read_text()
     rows = load_registry()
-    failures = 0
-    unchecked = 0
-
     if not rows:
         print("registry.csv is missing - nothing can be verified")
         return 1
+
+    failures = 0
+    unchecked = 0
 
     print("quoted figures against experiments/registry.csv:\n")
     for label, exp_id, opponents, key, quoted in CLAIMS:
@@ -122,6 +119,7 @@ def main():
         values = per_seed(rows, name, 3, "mean_score")
         if values:
             means.append(statistics.mean(values))
+
     if len(means) >= 3:
         sd = statistics.stdev(means)
         print("  runs %s" % ", ".join("%.3f" % v for v in means))

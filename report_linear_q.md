@@ -20,7 +20,11 @@ is that nothing so far has made this agent bomb *and* live. On tabular_q's own
 tournament protocol it scores 0.130 against 2.210 (t = 12.88, 10 of 10 seeds),
 so it is not the submitted agent. It still has its own selected, verified
 model - seed 10 of the solo-trained configuration, 0.510 on held-out arenas
-(Phase 8) - as the project's required second model.
+(Phase 8) - as the project's required second model. The one lever aimed
+directly at the score-survival trade, `reward_survived`, was tested and
+rejected (Phase 9): it inherits the same rare-terminal-event problem
+`escape_shaping` was built to avoid, since `SURVIVED_ROUND` fires in only 2.3%
+of training episodes.
 
 ---
 
@@ -89,6 +93,7 @@ identical defaults.
 | 6 | is the 6000-episode budget still binding at the winning weight? | 12000 scores 1.83x more, and the gain transfers to `classic` | **budget was binding** |
 | 7 | tabular_q's own protocol: four agents on `classic`, trained with opponents | 0.130 against tabular_q's 2.210, t = 12.88, 10/10 seeds | **not competitive** |
 | 8 | select and ship this branch's own model, seed 10 of `lq_p6_budget12k` | 0.510 on held-out arenas, not used to pick it | **shipped** |
+| 9 | `reward_survived` in {1.0, 3.0, 5.0}, paired against control on four-agent `classic` | best (5.0) indistinguishable from control, t=0.38; 1.0 significantly worse, t=-2.67 | **rejected, mechanism understood** |
 
 ---
 
@@ -819,6 +824,97 @@ an untrained placeholder.
 
 ---
 
+## Phase 9 - `reward_survived`: a negative result, and why
+
+### 9.1 The hypothesis
+
+Every intervention through Phase 6 traded score against survival along the
+same axis; nothing broke that trade. `reward_survived` (in `config.py` since
+the branch forked, never used - default 0.0) was the one candidate that had
+never been tried and is aimed directly at that axis rather than at either side
+of it: currently the only signal against dying is the -5 terminal penalty,
+propagated back through gamma. There is no positive reward for reaching
+`SURVIVED_ROUND` itself. Two other candidates were considered and rejected
+before running anything, on evidence already in this log: a larger death
+penalty (tabular_q's Phase 17b tried -15, score fell 0.50) and an
+escape-route-count feature (tabular_q's Phase 20 `bomb_safety`, read as
+permission to bomb rather than caution, bombs +54%, score -0.62). Both failed
+on the sibling agent under a near-identical reward structure, so neither was
+worth re-testing here without new reason to expect a different outcome.
+
+### 9.2 A promising probe, and why it did not generalise
+
+A cheap check first: 1 seed, 3000 episodes (a quarter of the full budget),
+`reward_survived=3.0`. Suicide fell to 0.387 against the 6000-episode,
+`reward_survived=0` reference of 0.619 (Phase 5), while `mean_crates` stayed
+at 7.74 - active, not collapsed into the passive failure mode weight=1.0
+produced in Phase 5. The direction and the absence of collapse were enough to
+justify the full sweep; the magnitude was not - a single short probe is a
+sanity check, not an estimate.
+
+The full sweep - 10 seeds, 12000 episodes, `reward_survived` in {1.0, 3.0,
+5.0}, otherwise identical to the shipped configuration - evaluated on
+`classic`, four agents, matching Phase 8's real metric rather than the
+`loot-crate` proxy Phase 5-6 were measured on:
+
+| reward_survived | score | suicide | bombs | crates |
+|---|---|---|---|---|
+| 0.0 (control) | 0.410 | 0.896 | 7.03 | 11.79 |
+| 1.0 | 0.313 | 0.915 | 6.04 | 9.99 |
+| 3.0 | 0.355 | 0.882 | 6.75 | 10.18 |
+| 5.0 | 0.427 | 0.856 | 7.40 | 10.64 |
+
+**A control measured under the wrong opponent condition was caught before it
+was trusted.** The obvious control - the existing `lq_p6_budget12k` numbers
+already in the registry - used `rule_based_seeded`, while this sweep used the
+stock, unseeded `rule_based_agent` to match Phase 8's ship convention. Those
+are not comparable; the 0.0 row above is a fresh measurement of the same ten
+models, re-evaluated under the sweep's actual opponent, not reused from a
+different protocol.
+
+Paired by training seed (identical world seed and exploration RNG across all
+four arms, since neither depends on `reward_survived`):
+
+| | vs control, score | t (score) | vs control, suicide | t (suicide) |
+|---|---|---|---|---|
+| 1.0 | -0.097 | -2.67 | +0.019 | 1.64 |
+| 3.0 | -0.055 | -1.53 | -0.014 | -0.43 |
+| 5.0 | +0.017 | 0.38 | -0.040 | -0.87 |
+
+**The hypothesis is not confirmed.** 1.0 is significantly worse on score
+($t=-2.67$); 5.0, the best of the three, is indistinguishable from the control
+on both measures ($|t|<1$). The probe's 0.387 suicide rate does not generalise
+- ten seeds at the full budget show an effect too small and too noisy to call
+real, in either direction.
+
+### 9.3 Diagnosis: the same sparse-reward problem `escape_shaping` was built to avoid
+
+`SURVIVED_ROUND` fired in 274 of 12000 training episodes - 2.3% - measured
+directly from the `reward_survived=5.0` training log, not assumed. That is the
+same shape of problem Phase 3 diagnosed for escaping a bomb (1 success in 2000
+early episodes): a reward tied to a rare terminal outcome gives the model
+almost nothing to learn from, because most updates never see it.
+
+`escape_shaping` does not have this problem, and the contrast is the point:
+being potential-based, it pays out *every step*, proportional to how much
+closer to safety that step moved the agent, regardless of whether the episode
+goes on to end well. `reward_survived` pays out only at the one event that is
+still rare precisely because the underlying problem - dying to a bomb - is not
+solved. It is not a new, independent lever on the score-survival trade; it is
+a sparser, weaker version of the signal `escape_shaping_weight` already
+supplies, arriving too rarely to move weights that a shared linear
+representation and a decaying step size have already mostly settled by the
+time it does.
+
+**Decision:** `reward_survived` stays at its default 0.0. The shipped model
+(Phase 8, seed 10, `escape_shaping_weight=0.1`) is unchanged - nothing tested
+here beat it. Kept as a negative result because the mechanism is now
+understood, not just the outcome: any future attempt at this axis needs a
+dense, per-step signal (a potential, not a terminal bonus) or it will hit the
+same rarity problem.
+
+---
+
 ## Settings currently in force
 
 ```
@@ -859,6 +955,13 @@ seed passive or broken. The failure follows the seed, not the schedule value.
 stops the agent bombing at all, re-creating Phase 3's collapse (6/10 seeds at
 `coins = 0.000`, score 0.047) from the opposite direction. The usable band is
 roughly 0.05 to 0.5.
+
+`reward_survived` at 1.0, 3.0 or 5.0 (9.2-9.3) - paired against a matched
+control, 1.0 is significantly worse, 3.0 is not significantly different, 5.0
+(the best of the three) is statistically indistinguishable from not using it
+at all. `SURVIVED_ROUND` fires in 2.3% of training episodes even at 5.0, too
+rare for a one-time terminal bonus to teach anything a dense per-step
+potential does not already provide.
 
 ## Open
 

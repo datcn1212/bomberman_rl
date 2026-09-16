@@ -1,21 +1,17 @@
-"""Evaluation harness: runs an agent under a fixed protocol and turns the
-framework's stats JSON into the metrics the experiment log reports.
+"""Runs an agent under a fixed protocol and turns the framework's stats JSON
+into the numbers the experiment log reports.
 
-Two modes, as described in the runbook:
+Two modes:
 
-FAST  -- one process per seed playing `n_rounds` rounds. Cheap, used for the
-         inner loop (hyperparameter search, ablations). `by_agent` only holds
-         totals over the rounds, so this mode yields means but no per-round
-         distribution and no exact win rate.
+FAST   one process per seed, n_rounds rounds each. Cheap, used for sweeps and
+       ablations. by_agent only has totals, so we get means but no per-round
+       distribution and no real win rate.
+EXACT  one process per seed, one round each, so every stats file describes a
+       single round. Slow (process startup dominates) but gives win rate and
+       survival honestly.
 
-EXACT -- one process per seed playing a single round, so every stats file
-         describes exactly one round. Expensive (process startup dominates) but
-         gives per-round distributions, an exact win rate, and survival, because
-         `by_round[round]["steps"]` can be compared against the agent's own step
-         count.
-
-Both modes always play with `--train 0`, which makes the framework set
-`continue_without_training`, so rounds are not cut short when our agent dies.
+Always played with --train 0 so the framework keeps rounds going after our
+agent dies, instead of cutting them short.
 """
 
 import argparse
@@ -33,13 +29,9 @@ ROOT = Path(__file__).resolve().parent.parent
 RESULTS = ROOT / "results"
 REGISTRY = ROOT / "experiments" / "registry.csv"
 
-# Each agent picks its own environment variable for the config path it reads
-# (agent_code/<name>/config.py), because the framework gives an agent no other
-# way to receive run-specific parameters. A hardcoded "TQ_CONFIG" here would
-# make every tool silently train and evaluate any other agent on its untouched
-# defaults - no error, just a run that measured nothing it claims to have
-# measured. New agents register here; a name that is missing fails loudly
-# rather than falling through to a wrong variable.
+# Each agent reads its run config from its own env var. Hardcoding one name
+# here would mean silently evaluating a different agent on untouched defaults -
+# no error, just a measurement of nothing. Unknown names fail loudly.
 CONFIG_ENV_VAR = {
     "tabular_q": "TQ_CONFIG",
     "linear_q": "LQ_CONFIG",
@@ -50,25 +42,25 @@ def config_env_var(agent):
     try:
         return CONFIG_ENV_VAR[agent]
     except KeyError:
-        raise KeyError(
-            "no config env var registered for agent %r; add it to "
-            "tools/evaluate.py:CONFIG_ENV_VAR" % agent) from None
+        raise KeyError("no config env var for agent %r; add it to "
+                       "tools/evaluate.py:CONFIG_ENV_VAR" % agent) from None
 
-# Fixed evaluation seeds. Training never uses these, so every reported number is
-# measured on arenas the agent was not trained on. Identical for every version
-# so that comparisons across experiments are fair.
+
+# Never used for training, so every reported number comes from arenas the agent
+# has not seen. Same list for every experiment, so runs stay comparable.
 EVAL_SEEDS = list(range(9001, 9031))
 
-# Upper bound on one `main.py play` call. Generous: the slowest observed block
-# is ~120 s per process.
+# Cap on one play call. Generous - the slowest block seen is about 120 s - but
+# a wedged child would otherwise block the pool indefinitely.
 PLAY_TIMEOUT = 900
 
 
 def _play(args):
-    """Run one `main.py play` process and return the parsed stats dict."""
+    """One `main.py play` process; returns the parsed stats dict."""
     tag, agents, scenario, n_rounds, seed, train_flag, extra_env = args
-    stats_path = RESULTS / "eval" / f"{tag}.json"
+    stats_path = RESULTS / "eval" / ("%s.json" % tag)
     stats_path.parent.mkdir(parents=True, exist_ok=True)
+
     cmd = [sys.executable, "main.py", "play", "--no-gui",
            "--agents", *agents,
            "--scenario", scenario,
@@ -77,9 +69,7 @@ def _play(args):
            "--train", str(train_flag),
            "--save-stats", str(stats_path)]
     env = dict(os.environ, **(extra_env or {}))
-    # A hard timeout, because a child that dies or wedges otherwise blocks the
-    # pool for ever: one segfaulting worker once stalled a run for three hours
-    # with no output and no error.
+
     try:
         proc = subprocess.run(cmd, cwd=ROOT, env=env, capture_output=True,
                               text=True, timeout=PLAY_TIMEOUT)
@@ -87,21 +77,22 @@ def _play(args):
         raise RuntimeError("eval run %s exceeded %ds and was killed"
                            % (tag, PLAY_TIMEOUT))
     if proc.returncode != 0:
-        raise RuntimeError(f"eval run {tag} failed:\n{proc.stdout[-2000:]}\n{proc.stderr[-4000:]}")
+        raise RuntimeError("eval run %s failed:\n%s\n%s"
+                           % (tag, proc.stdout[-2000:], proc.stderr[-4000:]))
     with open(stats_path) as fh:
-        return json.loads(fh.read())
+        return json.load(fh)
 
 
 def _agent_key(stats, agent_name, index=0):
-    """Resolve the stats key for an agent, accounting for the `_0`/`_1` suffix
-    the framework adds when the same code runs several times."""
+    """Find our agent in by_agent; the framework adds _0/_1 when the same code
+    plays several slots."""
     keys = list(stats["by_agent"].keys())
     if agent_name in keys:
         return agent_name
     suffixed = sorted(k for k in keys if k.startswith(agent_name + "_"))
     if suffixed:
         return suffixed[index]
-    raise KeyError(f"{agent_name} not among {keys}")
+    raise KeyError("%s not among %s" % (agent_name, keys))
 
 
 def _mean_std(values):
@@ -116,20 +107,19 @@ def _mean_std(values):
 
 def evaluate(agent, opponents, scenario, mode="fast", seeds=None, n_rounds=30,
              tag="eval", extra_env=None, workers=4):
-    """Evaluate `agent` against `opponents`; return a metrics dict."""
+    """Play `agent` against `opponents` and return the metrics dict."""
     seeds = list(seeds if seeds is not None else EVAL_SEEDS)
     agents = [agent] + list(opponents)
     rounds_per_call = 1 if mode == "exact" else n_rounds
 
-    # The opponent's seed is the arena's seed. `rule_based_seeded` reads OPP_SEED
-    # and seeds the `random` module from it, so each arena pairs with one fixed
-    # opponent behaviour and the whole measurement repeats exactly. Thirty arenas
-    # therefore sample thirty reproducible opponents rather than one, which keeps
-    # the estimate from fitting a single set of tie-breaks. The stock
-    # `rule_based_agent` ignores OPP_SEED entirely, so passing it is harmless.
-    jobs = [(f"{tag}_{mode}_s{seed}", agents, scenario, rounds_per_call, seed, 0,
-             dict(extra_env or {}, OPP_SEED=str(seed)))
+    # OPP_SEED = the arena seed. rule_based_seeded seeds `random` from it, so
+    # each arena gets one fixed opponent behaviour and the run repeats exactly;
+    # 30 arenas then sample 30 reproducible opponents instead of one. The stock
+    # rule_based_agent ignores the variable, so setting it is harmless.
+    jobs = [("%s_%s_s%d" % (tag, mode, seed), agents, scenario, rounds_per_call,
+             seed, 0, dict(extra_env or {}, OPP_SEED=str(seed)))
             for seed in seeds]
+
     t0 = time.time()
     if workers > 1:
         with ProcessPoolExecutor(max_workers=workers) as pool:
@@ -150,7 +140,8 @@ def evaluate(agent, opponents, scenario, mode="fast", seeds=None, n_rounds=30,
         me = stats["by_agent"][me_key]
         rounds = me.get("rounds", 1) or 1
         opp_keys = [k for k in stats["by_agent"] if k != me_key]
-        opp_scores = [stats["by_agent"][k].get("score", 0) / (stats["by_agent"][k].get("rounds", 1) or 1)
+        opp_scores = [stats["by_agent"][k].get("score", 0)
+                      / (stats["by_agent"][k].get("rounds", 1) or 1)
                       for k in opp_keys]
 
         my_mean_score = me.get("score", 0) / rounds
@@ -159,16 +150,15 @@ def evaluate(agent, opponents, scenario, mode="fast", seeds=None, n_rounds=30,
         per_seed_kills.append(me.get("kills", 0) / rounds)
         per_seed_suicide.append(me.get("suicides", 0) / rounds)
         per_seed_margin.append(my_mean_score - (max(opp_scores) if opp_scores else 0.0))
-        # Bombs and crates separate a genuinely safe policy from a merely
-        # passive one: never bombing also scores zero suicides.
+        # bombs/crates separate a safe policy from a merely passive one: never
+        # bombing also gives a suicide rate of zero
         per_seed_bombs.append(me.get("bombs", 0) / rounds)
         per_seed_crates.append(me.get("crates", 0) / rounds)
 
         total_invalid += me.get("invalid", 0)
         total_steps += me.get("steps", 0)
         total_time += me.get("time", 0.0)
-
-        for rid, rstat in stats["by_round"].items():
+        for rstat in stats["by_round"].values():
             round_steps.append(rstat["steps"])
 
         if mode == "exact":
@@ -178,11 +168,9 @@ def evaluate(agent, opponents, scenario, mode="fast", seeds=None, n_rounds=30,
                 wins += 1
             elif opp_scores and my_mean_score == best_opp:
                 draws += 1
-            # Surviving means being polled on every step of the round AND not
-            # having blown itself up. The step comparison alone is not enough:
-            # in a solo game the round ends the moment the agent dies, so its
-            # step count always equals the round length and every round would
-            # look survived.
+            # Survived = polled on every step AND didn't blow itself up. The
+            # step check alone isn't enough: solo, the round ends when we die,
+            # so our step count always equals the round length.
             only_round = next(iter(stats["by_round"].values()))
             if me.get("steps", 0) >= only_round["steps"] and not me.get("suicides", 0):
                 survived += 1
@@ -223,6 +211,8 @@ def evaluate(agent, opponents, scenario, mode="fast", seeds=None, n_rounds=30,
     return metrics
 
 
+# Column order of experiments/registry.csv. Don't reorder - old rows would no
+# longer line up with the header.
 FIELDS = ["timestamp", "exp_id", "tag", "mode", "agent", "opponents", "scenario", "seeds",
           "rounds_per_seed", "mean_score", "score_std", "score_margin", "score_margin_std",
           "mean_coins", "coins_std", "mean_kills", "kills_std", "suicide_rate", "suicide_std",
@@ -238,17 +228,18 @@ def register(metrics, exp_id="", note=""):
     row["timestamp"] = time.strftime("%Y-%m-%d %H:%M:%S")
     row["exp_id"] = exp_id
     row["note"] = note
-    # Appending under a header written by an older version of FIELDS silently
-    # shifts every column added since, so the header is checked, not assumed.
+
+    # Check the header rather than assume it: appending under a header from an
+    # older FIELDS would shift every column added since.
     if REGISTRY.exists():
         with open(REGISTRY) as fh:
             existing = next(csv.reader(fh), [])
         if existing and existing != FIELDS:
             raise RuntimeError(
-                "experiments/registry.csv was written with a different column set "
-                "(%d columns, expected %d). Rewrite it with the current FIELDS "
-                "before appending, or the columns will not line up."
+                "registry.csv has a different column set (%d, expected %d); "
+                "rewrite it before appending or the columns won't line up"
                 % (len(existing), len(FIELDS)))
+
     write_header = not REGISTRY.exists()
     with open(REGISTRY, "a", newline="") as fh:
         writer = csv.DictWriter(fh, fieldnames=FIELDS)
@@ -288,7 +279,7 @@ def main():
     p.add_argument("--workers", type=int, default=4)
     args = p.parse_args()
 
-    tag = args.tag or f"{args.agent}_{args.scenario}_{args.mode}"
+    tag = args.tag or "%s_%s_%s" % (args.agent, args.scenario, args.mode)
     m = evaluate(args.agent, args.opponents, args.scenario, mode=args.mode,
                  seeds=EVAL_SEEDS[:args.seeds], n_rounds=args.n_rounds,
                  tag=tag, workers=args.workers)

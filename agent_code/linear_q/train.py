@@ -1,23 +1,13 @@
-"""Semi-gradient TD update, driven by the framework's training callbacks.
+"""Training callbacks: one-step semi-gradient TD.
 
-The staging pattern is unchanged from tabular_q/train.py: it exists because of
-a framework delivery quirk (measured in Phase 0, tools/verify_events.py), not
-because of anything about the function approximator.
+The staging pattern is the same as tabular_q/train.py and exists for the same
+reason (a framework quirk, measured in Phase 0):
 
-  * when the agent survives, the last step arrives twice -- once through
-    `game_events_occurred` and once through `end_of_round`, the second time with
-    SURVIVED_ROUND attached;
-  * when the agent dies, the fatal step arrives *only* through `end_of_round`.
+  - surviving, the last step arrives twice, the second time with SURVIVED_ROUND;
+  - dying, the fatal step arrives only through end_of_round.
 
-So transitions are staged rather than learned on arrival. A staged transition is
-flushed when the next one shows up, and `end_of_round` either replaces it (same
-step number -- it is the re-delivery) or flushes it first (different step number
--- the agent died and this is a genuinely new transition).
-
-One-step only for now. tabular_q reached n-step returns and Watkins Q(lambda)
-only at Phase 27, long after its one-step baseline was established and
-understood; multi-step credit assignment for this agent is future work, not
-part of getting it running.
+So transitions are staged and flushed when the next one arrives. No n-step or
+Q(lambda) here - this branch never got past the one-step baseline.
 """
 
 import csv
@@ -31,9 +21,11 @@ from .model import observe_and_encode, to_frame
 
 
 class Transition:
-    __slots__ = ("step", "phi", "action", "reward", "next_phi", "terminal", "coins", "crates", "bombs")
+    __slots__ = ("step", "phi", "action", "reward", "next_phi", "terminal",
+                 "coins", "crates", "bombs")
 
-    def __init__(self, step, phi, action, reward, next_phi, terminal, coins, crates, bombs):
+    def __init__(self, step, phi, action, reward, next_phi, terminal,
+                 coins, crates, bombs):
         self.step = step
         self.phi = phi
         self.action = action
@@ -57,31 +49,16 @@ def setup_training(self):
 
 
 def _potential(self, obs):
-    """Phi(s) = -w_target * distance to the nearest target
-              - w_escape * danger urgency at the current tile.
+    """Phi(s) = -w_target * target distance - w_escape * danger urgency.
 
-    Two independent potentials, summed. Ng et al.'s policy-invariance guarantee
-    holds for any Phi(s), and a sum of two valid potentials is itself a valid
-    potential - Phi(terminal) = 0 either way - so the escape term needed no
-    change to how the target term is used at the call sites, only an addition
-    here.
+    Two independent potentials added together. Ng et al. holds for any Phi(s),
+    and a sum of valid potentials is valid too, so adding the escape term meant
+    no change at the call sites.
 
-    Target term (Phase 1): capped so "no target reachable" and "target very
-    far" are the same value; an unbounded potential would make the shaping
-    term jump whenever the last coin on a board is collected.
-
-    Escape term (Phase 4, report_linear_q.md): `t_here` is 0 when the current
-    tile never becomes lethal and 1..4 counting down to detonation, so unlike
-    target_dist a *smaller* nonzero t_here is worse, not better. Remapped into
-    an urgency score that is 0 when safe and largest right before the blast,
-    so its sign matches the target term - larger potential is always better,
-    for both.
-
-    Phase 3 found the model rarely experiences a successful escape - 1 of 2000
-    early-training episodes - so the only signal against dying was the -5
-    terminal penalty, propagated back through gamma across however many steps
-    preceded it. This adds a reward on *every step* for reducing how urgent the
-    danger is, whether or not the episode goes on to survive.
+    Careful with the sign: t_here is 0 when the tile never burns and 1..4
+    counting down to the blast, so a *smaller* nonzero t_here is worse - the
+    opposite of target_dist. The remap below flips it so that for both terms,
+    higher potential means better.
     """
     phi = 0.0
     if self.cfg.shaping_weight:
@@ -89,6 +66,7 @@ def _potential(self, obs):
         if obs.target_dir != DIR_NONE:
             dist = min(obs.target_dist, self.cfg.shaping_distance_cap)
         phi -= self.cfg.shaping_weight * dist
+
     if self.cfg.escape_shaping_weight:
         urgency = 0 if obs.t_here == 0 else (5 - obs.t_here)
         phi -= self.cfg.escape_shaping_weight * urgency
@@ -96,24 +74,16 @@ def _potential(self, obs):
 
 
 def _wasted_bomb(old_game_state, events):
-    """True when the agent dropped a bomb whose blast covers no crate.
-
-    Evaluated on the state the bomb was dropped from, so the penalty lands on
-    the transition that made the decision rather than four steps later, where
-    tabular_q's Phase 4 showed it cannot be attributed.
-    """
     if e.BOMB_DROPPED not in events:
         return False
     return Board(old_game_state).bomb_payload() == 0
 
 
 def _is_trapped(game_state):
-    """Standing inside a blast schedule with no surviving move."""
     return Board(game_state).escape_search() == DIR_NONE
 
 
 def _bomb_without_escape(old_game_state, events):
-    """A bomb was dropped and nothing survives the blast it creates."""
     if e.BOMB_DROPPED not in events:
         return False
     pos = old_game_state["self"][3]
@@ -121,18 +91,14 @@ def _bomb_without_escape(old_game_state, events):
 
 
 def reward_from(self, events, old_game_state=None):
-    """Map a step's events onto a scalar reward.
-
-    Crates and revealed coins are counted per occurrence, because one
-    well-placed bomb can destroy several at once and a flat bonus would make a
-    bomb that clears one crate worth as much as a bomb that clears four.
-    """
+    """Scalar reward for one step's events. Crates and coins count per occurrence."""
     cfg = self.cfg
     reward = cfg.reward_step
     reward += cfg.reward_coin * events.count(e.COIN_COLLECTED)
     reward += cfg.reward_kill * events.count(e.KILLED_OPPONENT)
     reward += cfg.reward_crate * events.count(e.CRATE_DESTROYED)
     reward += cfg.reward_coin_found * events.count(e.COIN_FOUND)
+
     if e.INVALID_ACTION in events:
         reward += cfg.reward_invalid
     if e.WAITED in events:
@@ -140,11 +106,11 @@ def reward_from(self, events, old_game_state=None):
     if e.KILLED_SELF in events:
         reward += cfg.reward_killed_self
     elif e.GOT_KILLED in events:
-        # KILLED_SELF always comes with GOT_KILLED; charging both would double
-        # the penalty for suicide relative to being killed by someone else.
+        # elif: KILLED_SELF comes with GOT_KILLED, don't charge both
         reward += cfg.reward_got_killed
     if e.SURVIVED_ROUND in events:
         reward += cfg.reward_survived
+
     if old_game_state is not None:
         if _wasted_bomb(old_game_state, events):
             reward += cfg.reward_bomb_wasted
@@ -156,24 +122,17 @@ def reward_from(self, events, old_game_state=None):
 
 
 def _best_next(self, phi):
-    """Bootstrap value of a state: max over *legal* actions only.
-
-    With BOMB masked out its column stays at zero, and a plain max would
-    bootstrap from that zero whenever every legal action is worth less -- an
-    optimistic target for an action the agent is not even allowed to take.
-    """
+    """max Q over legal actions only, so a masked BOMB column can't be the target."""
     return float(np.max(self.model.values(phi)[self.legal]))
 
 
 def _flush(self):
-    """Apply one semi-gradient TD step for the staged transition, if any."""
     t = self.pending
     self.pending = None
     if t is None:
         return
-    # Episode statistics are accumulated here rather than where the callback
-    # arrives, so that a transition dropped as a re-delivery is not counted.
-    # Counting on arrival is what makes a 50-coin board report 51 coins.
+
+    # counted here, not on arrival, so a re-delivered transition isn't double-counted
     self.episode_reward += t.reward
     self.episode_coins += t.coins
     self.episode_crates += t.crates
@@ -188,11 +147,11 @@ def game_events_occurred(self, old_game_state, self_action, new_game_state, even
     if old_game_state is None or self_action is None:
         return
     _flush(self)
-    old_phi, old_obs, old_perm, _ = observe_and_encode(
-        old_game_state, self.cfg.use_symmetry)
-    new_phi, new_obs, _, _ = observe_and_encode(
-        new_game_state, self.cfg.use_symmetry)
+
+    old_phi, old_obs, old_perm, _ = observe_and_encode(old_game_state, self.cfg.use_symmetry)
+    new_phi, new_obs, _, _ = observe_and_encode(new_game_state, self.cfg.use_symmetry)
     shaping = (self.cfg.gamma * _potential(self, new_obs)) - _potential(self, old_obs)
+
     self.pending = Transition(
         step=old_game_state["step"],
         phi=old_phi,
@@ -209,15 +168,16 @@ def game_events_occurred(self, old_game_state, self_action, new_game_state, even
 def end_of_round(self, last_game_state, last_action, events):
     if last_action is not None:
         if self.pending is not None and self.pending.step == last_game_state["step"]:
-            # Re-delivery of a step already staged: keep the end_of_round
-            # version, which carries the complete event list.
+            # re-delivery of a step we already staged; keep this version, it has
+            # the complete event list
             self.pending = None
         else:
             _flush(self)
-        # Terminal transition: Ng et al. require Phi(terminal) = 0 for the
-        # policy-invariance guarantee, so the shaping term is just -Phi(s).
+
         last_phi, last_obs, last_perm, _ = observe_and_encode(
             last_game_state, self.cfg.use_symmetry)
+        # Phi(terminal) must be 0 for the policy-invariance guarantee, so the
+        # shaping term on the terminal step is just -Phi(s).
         self.pending = Transition(
             step=last_game_state["step"],
             phi=last_phi,
