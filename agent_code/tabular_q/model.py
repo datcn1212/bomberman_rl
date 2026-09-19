@@ -1,15 +1,7 @@
-"""Q table plus the encoding that turns an observation into a row index.
-
-The state is a handful of small integers, so mixed-radix packing gives each
-combination its own row. LAYOUT holds the radices and FEATURE_VERSION the
-meaning behind them; both go into the pickle and are checked on load. Checking
-the radices alone isn't enough - redefining what a value means without changing
-how many values there are would make every lookup silently return a row that
-was trained for something else.
-
-The table is a dict, not an array: only ~630 of 43740 rows are ever visited,
-because most combinations are geometrically impossible (a tile can't be blocked
-on all four sides and still have an escape through one of them).
+"""Q table + encoding from observation to row index.
+State is a few small ints, mixed-radix packed into one row each. 
+LAYOUT (radices) and FEATURE_VERSION (value meanings) are pickled and checked on load.
+Radices alone miss a change in meaning, and lookups would silently hit rows trained for something else.
 """
 
 import pickle
@@ -34,9 +26,6 @@ FEATURE_VERSION = 5
 N_STATES = int(np.prod(LAYOUT))
 N_ACTIONS = len(ACTIONS)
 
-# Handed back for rows nobody has touched yet. Read-only so a caller can't
-# accidentally write into the shared array - every write goes through update(),
-# which allocates a real row first.
 _UNSEEN = np.zeros(N_ACTIONS, dtype=np.float64)
 _UNSEEN.flags.writeable = False
 _UNSEEN_COUNTS = np.zeros(N_ACTIONS, dtype=np.int64)
@@ -66,14 +55,9 @@ def encode(obs):
 
 
 # --- D4 symmetry ---------------------------------------------------------
-# The board and the rules are symmetric under 4 rotations x 2 reflections, and
-# our features are all relative to the agent, so a rotated board is the same
-# situation. The encoding uses absolute directions though, so it lands on a
-# different row. Folding onto the orbit took the median row from 98 updates to
-# 506 (Phase 12).
-#
-# DIRS is (UP, RIGHT, DOWN, LEFT). Rotating 90 degrees clockwise sends index i
-# to (i+1) % 4; mirroring in the vertical axis keeps UP/DOWN and swaps L/R.
+# The board and the rules are symmetric under 4 rotations x 2 reflections -> a rotated board is the same situation. 
+# DIRS is (UP, RIGHT, DOWN, LEFT). Rotating 90 degrees clockwise sends index i to (i+1) % 4; 
+# mirroring in the vertical axis keeps UP/DOWN and swaps L/R.
 _ROT = (1, 2, 3, 0)
 _MIRROR = (0, 3, 2, 1)
 
@@ -97,7 +81,7 @@ IDENTITY = (0, 1, 2, 3)
 
 
 def _relabel(perm, obs):
-    """Index of this observation after relabelling its directions by perm."""
+    """Index of this observation after relabelling directions by perm."""
     status = [0] * 4
     for i in range(4):
         status[perm[i]] = obs.move_status[i]
@@ -111,11 +95,7 @@ def _relabel(perm, obs):
 
 
 def canonical(obs):
-    """Smallest index in the orbit, plus the permutation that gets there.
-
-    The permutation has to come back too: it relabels directions, so the caller
-    needs it to convert between real actions and canonical-frame actions.
-    """
+    """Smallest index in the orbit, plus the permutation that gets there"""
     best_index, best_perm = None, None
     for perm in D4:
         index = _relabel(perm, obs)
@@ -175,12 +155,6 @@ class QModel:
         row[action] += alpha * (target - row[action])
 
     def add(self, state, action, amount):
-        """Add to one entry without counting a visit.
-
-        Eligibility traces spread one TD error over every pair in the trace, but
-        only one of them was actually visited. Counting them all would inflate
-        the visit counts and kill the step size for states we've barely seen.
-        """
         self._row(state)[action] += amount
 
     def note_visit(self, state, action):
@@ -188,11 +162,7 @@ class QModel:
         self.seen[state][action] += 1
 
     def effective_alpha(self, state, action, cfg):
-        """alpha / (1 + n/half_life), n = updates of this (state, action) pair.
-
-        Rare pairs keep learning fast, heavily-visited ones settle down. A
-        constant alpha never converges at all (Phase 2).
-        """
+        """alpha / (1 + n/half_life), n = updates of this (state, action) pair"""
         if cfg.alpha_schedule == "constant":
             return cfg.alpha
         if cfg.alpha_schedule == "visit":
@@ -218,13 +188,7 @@ class QModel:
 
 
 def observe_and_encode(game_state, use_symmetry):
-    """Observation, its table index, and the frame the index is written in.
-
-    Deliberately not cached: the framework gives the state before and after an
-    action the same `step` number, so (round, step) doesn't identify a state.
-    Caching on it returns a stale danger schedule exactly when the agent hasn't
-    moved - i.e. when it is standing still inside a blast.
-    """
+    """Observation, table index, and the frame the index is written in"""
     obs = observe(game_state)
     if use_symmetry:
         index, perm = canonical(obs)

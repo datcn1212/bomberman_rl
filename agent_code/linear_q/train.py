@@ -1,13 +1,11 @@
 """Training callbacks: one-step semi-gradient TD.
 
-The staging pattern is the same as tabular_q/train.py and exists for the same
-reason (a framework quirk, measured in Phase 0):
+Staging pattern matches tabular_q/train.py, same framework quirk:
+  - surviving: last step arrives twice, second time with SURVIVED_ROUND
+  - dying: the fatal step arrives only through end_of_round
 
-  - surviving, the last step arrives twice, the second time with SURVIVED_ROUND;
-  - dying, the fatal step arrives only through end_of_round.
-
-So transitions are staged and flushed when the next one arrives. No n-step or
-Q(lambda) here - this branch never got past the one-step baseline.
+Transitions are staged and flushed when the next one arrives. One-step only,
+no n-step or Q(lambda) on this branch.
 """
 
 import csv
@@ -51,14 +49,12 @@ def setup_training(self):
 def _potential(self, obs):
     """Phi(s) = -w_target * target distance - w_escape * danger urgency.
 
-    Two independent potentials added together. Ng et al. holds for any Phi(s),
-    and a sum of valid potentials is valid too, so adding the escape term meant
-    no change at the call sites.
+    Two potentials summed; a sum of valid potentials is itself valid, so the
+    escape term needed no change at the call sites.
 
-    Careful with the sign: t_here is 0 when the tile never burns and 1..4
-    counting down to the blast, so a *smaller* nonzero t_here is worse - the
-    opposite of target_dist. The remap below flips it so that for both terms,
-    higher potential means better.
+    Sign note: t_here is 0 when the tile never burns, else 1..4 counting down,
+    so a smaller nonzero t_here is worse (opposite of target_dist). The remap
+    flips it so higher potential means better for both terms.
     """
     phi = 0.0
     if self.cfg.shaping_weight:
@@ -168,8 +164,7 @@ def game_events_occurred(self, old_game_state, self_action, new_game_state, even
 def end_of_round(self, last_game_state, last_action, events):
     if last_action is not None:
         if self.pending is not None and self.pending.step == last_game_state["step"]:
-            # re-delivery of a step we already staged; keep this version, it has
-            # the complete event list
+            # re-delivery of the staged step; end_of_round's copy has the full event list
             self.pending = None
         else:
             _flush(self)

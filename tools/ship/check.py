@@ -1,8 +1,8 @@
-"""Submission-readiness checks for one of our agents.
+"""Submission-readiness checks for one agent.
 
-Every check here is either a rule the tournament enforces or a failure mode
-that has already cost this project time. Timing is measured by calling the real
-act(), not by rebuilding what it does, so masking and everything else counts.
+Each check is either a tournament rule or a failure mode that already cost
+time once. Timing calls the real act(), not a rebuild of what it does, so
+masking and everything else counts.
 
     python3 tools/ship.py check
     python3 tools/ship.py check --agent linear_q
@@ -159,7 +159,7 @@ def measure_act(agent):
 
 
 def check_think_time(agent):
-    """The overrun penalty is cumulative - it borrows from the next step - so
+    """The overrun penalty is cumulative, borrowing from the next step, so
     the maximum matters, not the mean."""
     mean_ms, worst_ms = measure_act(agent)
     budget_ms = s.TIMEOUT * 1000

@@ -1,8 +1,4 @@
 """All hyperparameters for the tabular agent.
-
-Kept in one place so a run is described by a single JSON file. tools/train.py
-writes it and passes the path in TQ_CONFIG. Reasons for the values are in
-report_tabular_q.md, not repeated here.
 """
 
 import json
@@ -32,8 +28,7 @@ class Config:
     use_symmetry: bool = True       # fold states onto their D4 orbit
     use_opponent_blocking: bool = True
 
-    # rewards. Game score alone (1/coin, 5/kill) is too sparse, so we build
-    # the reward from the event list. Kill/coin ratio matches the real scoring.
+    # rewards
     reward_coin: float = 1.0
     reward_kill: float = 5.0
     reward_crate: float = 0.3
@@ -74,8 +69,7 @@ def load():
     with open(path) as fh:
         raw = json.load(fh)
 
-    # Crash on a typo instead of quietly running the default: a silently
-    # ignored key means the experiment didn't test what its name says.
+    # Crash on a typo instead of quietly running the default
     unknown = set(raw) - {f.name for f in fields(Config)}
     if unknown:
         raise KeyError("unknown config keys: %s" % sorted(unknown))

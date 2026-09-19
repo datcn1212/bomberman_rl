@@ -13,8 +13,6 @@ from . import features
 from .features import ACTIONS, BLOCKED
 from .model import LinearQModel, from_frame, observe_and_encode
 
-MODEL_FILE = "model.pkl"
-
 
 def setup(self):
     self.cfg = config.load()
@@ -44,18 +42,11 @@ def setup(self):
 
 
 def act(self, game_state):
-    # perm: the frame phi was built in, so the action has to be translated back.
-    # status: move_status in that same frame, so it indexes the same four
-    # directions as the Q values do.
+    # perm: frame phi was built in, translate the action back after choosing.
+    # status: move_status in that same frame, matches the Q value indexing.
     phi, _, perm, status = observe_and_encode(game_state, self.cfg.use_symmetry)
     values = self.model.values(phi)
 
-    # Drop actions that are invalid no matter what Q says. Unlike the table,
-    # additive one-hot features give no guarantee that a blocked direction
-    # scores lowest - Phase 1 found a greedy policy walking into a wall, not
-    # moving, seeing the same state again and repeating for the whole episode.
-    # BOMB on cooldown is the same trap: phi has no bomb-availability feature
-    # at all, so Q(BOMB) ranking first is equally unguaranteed.
     can_bomb = bool(game_state["self"][2])
     candidates = [a for a in self.legal
                   if (a < 4 and status[a] != BLOCKED) or a == 4 or (a == 5 and can_bomb)]

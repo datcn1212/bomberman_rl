@@ -1,11 +1,10 @@
-"""Turning a game_state into the small tuple the agent actually learns from.
+"""Turning a game_state into the small tuple the agent learns from.
 
-The important design point: danger is not a property of a tile, it is a
-property of a (tile, step) pair. A tile that burns in three steps can be
-crossed now. So instead of an "is dangerous" flag we build a schedule
-lethal[k] = which tiles kill you k decisions from now, and search over it.
+Danger is a property of a (tile, step) pair, not just a tile: a tile that
+burns in three steps can still be crossed now. lethal[k] tracks which tiles
+kill you k decisions from now, and the search runs over that.
 
-Timing (checked against the framework in Phase 0):
+Timing:
   bomb with timer t  -> lethal at k = t and k = t+1
   explosion_map > 0  -> lethal at k = 0 only
   bomb dropped now   -> shows up next step with timer 3, so lethal at k = 4, 5
@@ -32,7 +31,7 @@ DIR_NONE, DIR_HERE = 0, 5
 # target_kind
 KIND_CRATE, KIND_COIN = 0, 1
 
-# Slots kept in the encoding but no longer filled (Phases 5, 20, 22).
+# Slots kept in the encoding but no longer filled.
 BOMB_NONE = 0
 OPP_NONE = 0
 
@@ -58,8 +57,7 @@ def blast_tiles(field, x, y):
 
 def danger_schedule(game_state, extra_bomb=None):
     """lethal[k][x, y]: standing on (x, y) in k decisions is fatal.
-
-    extra_bomb lets us ask "what if I bombed here", using the same code.
+    extra_bomb asks "what if a bomb went here", same code either way.
     """
     field = game_state["field"]
     lethal = np.zeros((HORIZON + 1,) + field.shape, dtype=bool)
@@ -82,15 +80,14 @@ def danger_schedule(game_state, extra_bomb=None):
 
 
 class Board:
-    """One step of the game: what we can walk on, what will kill us, where things are."""
+    """One step of the game: walkable tiles, what's lethal, where things are."""
 
     def __init__(self, game_state, extra_bomb=None):
         self.field = game_state["field"]
         self.pos = game_state["self"][3]
         self.coins = game_state["coins"]
         self.bomb_tiles = {tuple(pos) for pos, _ in game_state["bombs"]}
-        # Only used for the immediate move: two agents can't share a tile, so
-        # stepping onto one is an invalid action and we don't move at all.
+        # only for the immediate move: two agents can't share a tile
         if FLAGS["use_opponent_blocking"]:
             self.other_tiles = {tuple(other[3]) for other in game_state["others"]}
         else:
@@ -123,19 +120,15 @@ class Board:
 
     def escape_search(self):
         """First move of a path that survives the whole horizon.
-
-        BFS over (tile, step), not just tile - that is the whole point of the
-        schedule. Returns DIR_HERE if standing still is already safe, 1..4 for
-        a direction, DIR_NONE if nothing survives.
+        BFS over (tile, step), the point of the schedule. DIR_HERE if standing
+        still is already safe, 1..4 for a direction, DIR_NONE if nothing survives.
         """
         if self.lethal_at(self.pos, 0):
             return DIR_NONE          # blast lands here this step, too late
         if all(not self.lethal_at(self.pos, k) for k in range(HORIZON + 1)):
             return DIR_HERE
 
-        # Seed the four moves first and "stay put" last, so a real move wins a
-        # tie. Waiting is still an option - sometimes it is the only way out of
-        # a corridor - but we shouldn't report "stay" if we do have to leave.
+        # real moves seeded before "stay put" so a tie favours actually moving
         options = [((self.pos[0] + dx, self.pos[1] + dy), i + 1)
                    for i, (dx, dy) in enumerate(DIRS)]
         options.append((self.pos, DIR_HERE))
@@ -169,11 +162,9 @@ class Board:
 
     def target_search(self, coins):
         """Nearest coin, or nearest tile next to a crate. Returns (dir, kind, dist).
-
-        One BFS with two goal tests. A crate can't be walked onto, so "reaching"
-        it means standing next to it. Coins are tested first, so they win ties.
-        Tiles burning now or next step count as walls - routing through them is
-        how an agent walks into a blast on its way to a coin.
+        One BFS, two goal tests. Crates aren't walkable so "reaching" one means
+        standing next to it; coins tested first, so they win ties. Tiles burning
+        now or next step count as walls, or routing would walk into the blast.
         """
         coin_goals = set(coins)
         if self.pos in coin_goals:
@@ -238,10 +229,6 @@ class Observation:
         self.pos = pos
 
 
-def crate_positions(field):
-    return [(int(x), int(y)) for x, y in zip(*np.nonzero(field == 1))]
-
-
 def observe(game_state):
     board = Board(game_state)
     x, y = board.pos
@@ -258,8 +245,7 @@ def observe(game_state):
 
     target_dir, target_kind, target_dist = board.target_search(board.coins)
 
-    # bomb_opt / opponent / last_move are held constant: they were measured and
-    # rejected, but stay in the layout so old models still load.
+    # bomb_opt / opponent / last_move: measured and rejected, kept for old models
     return Observation(
         move_status=tuple(move_status),
         t_here=board.steps_until_lethal(),

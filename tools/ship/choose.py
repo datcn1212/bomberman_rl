@@ -1,9 +1,9 @@
 """Pick which trained seed to ship, ranked on arenas that don't report the result.
 
-Choosing the best seed on the same arenas we then quote inflates the number:
-with a run-to-run spread of ~0.09 on this board the gap between best and median
-seed is mostly noise, and picking on it is picking noise. So selection runs on
-a separate block of seeds, and the figure we report comes from the usual block,
+Choosing the best seed on the arenas later quoted inflates the number: with a
+run-to-run spread of ~0.09 on this board, the gap between best and median seed
+is mostly noise, and picking on it just picks noise. So selection runs on a
+separate block of seeds, and the reported figure comes from the usual block,
 which played no part in the choice.
 
     python3 tools/ship.py choose --exp-id final_tabular_q

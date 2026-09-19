@@ -1,11 +1,9 @@
 """What the framework calls: setup() once, act() every step.
-
 The framework chdir's into this folder before each event, so relative paths
 here still work when the agent is dropped onto the tournament machine.
 """
 
 import os
-
 import numpy as np
 
 from . import config
@@ -26,14 +24,9 @@ def setup(self):
 
     features.FLAGS["use_opponent_blocking"] = self.cfg.use_opponent_blocking
 
-    # Training either continues from a checkpoint or starts empty; playing has
-    # to load something. model_path defaults to the file next to this one, and
-    # the experiment harness points it at a specific checkpoint.
     source = self.cfg.continue_from if self.train else self.cfg.model_path
     if source and os.path.isfile(source):
         self.model = QModel.load(source)
-        # The model's own record of the flags wins over the config: it must be
-        # evaluated with the observation it was trained on.
         stored = dict(getattr(self.model, "feature_flags", None) or {})
         if "use_symmetry" in stored:
             self.cfg.use_symmetry = stored.pop("use_symmetry")
@@ -49,8 +42,6 @@ def setup(self):
 
 
 def act(self, game_state):
-    # perm is the frame the row is written in - with symmetry on we have to
-    # translate the chosen action back out of it before returning.
     state, _, perm = observe_and_encode(game_state, self.cfg.use_symmetry)
     values = self.model.values(state)[self.legal]
 
@@ -59,9 +50,7 @@ def act(self, game_state):
     else:
         choice = greedy(self.rng, values)
 
-    # Q(lambda) cuts the trace on a non-greedy action. Test the value, not which
-    # branch we took: an exploratory draw that lands on a best action is still
-    # greedy as far as the algorithm is concerned.
+    # Q(lambda) cuts the trace on a non-greedy action
     self.action_was_greedy = bool(values[choice] == values.max())
 
     action = from_frame(perm, int(self.legal[choice]))
@@ -75,7 +64,7 @@ def explore(self, values):
         return int(self.rng.integers(len(values)))
 
     if self.cfg.exploration == "max_boltzmann":
-        # subtract the max first so exp() can't overflow; it cancels out anyway
+        # subtract the max first so exp() can't overflow
         scaled = (values - values.max()) / max(self.cfg.temperature, 1e-6)
         weights = np.exp(scaled)
         total = weights.sum()
@@ -87,12 +76,6 @@ def explore(self, values):
 
 
 def greedy(rng, values):
-    """Argmax, ties broken at random.
-
-    np.argmax would always pick the lowest index, which on an all-zero row is
-    UP - a systematic bias on unvisited states that wouldn't show up in the
-    reward curve.
-    """
     best = np.flatnonzero(values == values.max())
     return int(best[0]) if len(best) == 1 else int(rng.choice(best))
 

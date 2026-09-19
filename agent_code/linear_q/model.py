@@ -1,24 +1,22 @@
 """Linear Q: Q(s, a) = phi(s) . w[:, a], plus the vectoriser that builds phi.
 
-Same observation as tabular_q (features.py is a copy), but instead of one table
-row per state we one-hot encode the categorical parts into a 33-dim vector and
-keep a weight matrix shared by every state. That is the whole difference
-between the two agents, which is what makes them comparable.
+Same observation as tabular_q (features.py is a copy), but one-hot encodes the
+categorical parts into a 33-dim vector with a shared weight matrix, instead of
+one table row per state. That's the only difference between the two agents.
 
-One thing the table gave us for free and this does not: with additive one-hot
-blocks, nothing forces "this direction is blocked" to outrank everything else,
-so a blocked move can come out on top. callbacks.act masks those out before
-choosing rather than hoping the weights learn it (Phase 1).
+Table rows guarantee nothing beats a blocked direction; additive one-hot
+blocks don't, so callbacks.act masks blocked moves before choosing instead of
+trusting the weights to learn it.
 
-D4 handling is the same idea as tabular_q's: pick a canonical frame, vectorise
-the relabelled observation, translate the chosen action back afterwards.
+D4 handling: pick a canonical frame, vectorise the relabelled observation,
+translate the chosen action back afterwards.
 """
 
 import pickle
 
 import numpy as np
 
-from .features import ACTIONS, BLOCKED, DIR_HERE, DIR_NONE, observe
+from .features import ACTIONS, DIR_HERE, DIR_NONE, observe
 
 N_ACTIONS = len(ACTIONS)
 FEATURE_VERSION = 3
@@ -66,11 +64,10 @@ def _direction_index(perm, value):
 
 
 def _tie_break_key(perm, obs):
-    """Orders the eight views so we can pick one deterministically.
+    """Orders the eight views for a deterministic pick.
 
-    Any total order would do - this is never stored - but using tabular_q's
-    mixed-radix order means both agents call the same view canonical, so the
-    D4 tests carry over between them.
+    Never stored, any total order works, but reusing tabular_q's mixed-radix
+    order means both agents agree on the canonical view.
     """
     status = [0] * 4
     for i in range(4):
@@ -125,8 +122,7 @@ def vectorize(move_status, t_here, target_dir, target_kind, escape_dir, target_d
     """Build phi(s) from fields that are already in the canonical frame."""
     phi = np.zeros(PHI_DIM, dtype=np.float64)
 
-    # each neighbour gets its own 3-wide block - "north is blocked" and "east is
-    # blocked" are different facts and a shared block would merge them
+    # each neighbour gets its own 3-wide block, else "blocked" would merge across directions
     offset = 0
     for i in range(4):
         phi[offset + move_status[i]] = 1.0
@@ -149,13 +145,11 @@ def vectorize(move_status, t_here, target_dir, target_kind, escape_dir, target_d
 def observe_and_encode(game_state, use_symmetry):
     """Returns (phi, obs, perm, status).
 
-    status is handed back separately because obs.move_status is the raw,
-    unrotated field, while phi (and therefore the Q values) is indexed by
-    canonical-frame directions. A caller that wants to know which of *those*
-    directions is blocked needs the relabelled version.
+    status is the relabelled move_status, in the same canonical frame as phi
+    and the Q values. obs.move_status alone is unrotated.
 
-    Not cached, same reason as tabular_q: the state before and after an action
-    share a step number, so caching on it serves a stale danger schedule.
+    Not cached: state before/after an action share a step number, so a cache
+    keyed on it would serve a stale danger schedule.
     """
     obs = observe(game_state)
     if use_symmetry:
@@ -175,19 +169,14 @@ class LinearQModel:
         self.feature_version = FEATURE_VERSION
         self.feature_flags = dict(feature_flags or {})
         self.w = np.zeros((PHI_DIM, N_ACTIONS), dtype=np.float64)
-        # How often w[i, a] actually moved. An update only touches entries where
-        # phi[i] != 0, so this counts per (feature, action), not per call.
+        # per (feature, action) update count, gated by phi[i] != 0, not per call
         self.visits = np.zeros((PHI_DIM, N_ACTIONS), dtype=np.int64)
 
     def values(self, phi):
         return phi @ self.w
 
     def update(self, phi, action, target, alpha):
-        """Semi-gradient TD step: w[:, a] += alpha * delta * phi.
-
-        Every active feature moves, not one cell. alpha may be a scalar or a
-        (PHI_DIM,) array - broadcasting covers both.
-        """
+        """w[:, a] += alpha * delta * phi. alpha can be scalar or (PHI_DIM,)."""
         delta = target - float(phi @ self.w[:, action])
         active = phi != 0
         self.w[:, action] += alpha * delta * phi
@@ -196,9 +185,9 @@ class LinearQModel:
     def effective_alpha(self, phi, action, cfg):
         """alpha / (1 + n/half_life), one value per feature.
 
-        Same Robbins-Monro shape as tabular_q, but n counts updates of this
-        weight entry, not of a state - a weight is shared by every state whose
-        feature is active. Constant alpha never settles (Phase 1.4).
+        n counts updates of the weight entry, not of a state, since one weight
+        is shared across every state where the feature is active. Constant
+        alpha never settles.
         """
         if cfg.alpha_schedule == "constant":
             return cfg.alpha

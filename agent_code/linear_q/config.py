@@ -1,7 +1,5 @@
-"""Hyperparameters for the linear agent.
-
-Same idea as tabular_q/config.py: one JSON file per run, path passed in
-LQ_CONFIG. Values were chosen by the sweeps in report_linear_q.md.
+"""Hyperparameters for the linear agent. One JSON file per run, path in LQ_CONFIG.
+Values chosen by the sweeps in report_linear_q.md.
 """
 
 import json
@@ -13,9 +11,7 @@ from dataclasses import dataclass, fields
 class Config:
     # learning
     alpha: float = 0.001
-    # "visit" decays alpha per weight entry w[i, a] by how often that entry was
-    # actually updated. Note this is per (feature, action), not per state like
-    # in tabular_q - one weight is shared by every state using that feature.
+    # "visit" decays alpha per weight entry, by (feature, action) not per state
     alpha_schedule: str = "visit"
     alpha_half_life: float = 1000.0
     gamma: float = 0.995
@@ -31,8 +27,7 @@ class Config:
     use_symmetry: bool = True
     use_opponent_blocking: bool = True
 
-    # rewards, copied from tabular_q: reward design depends on the game, not on
-    # how we approximate Q.
+    # rewards copied from tabular_q, depend on the game not on Q's form
     reward_coin: float = 1.0
     reward_kill: float = 5.0
     reward_crate: float = 0.3
@@ -42,7 +37,7 @@ class Config:
     reward_wait: float = -0.05
     reward_killed_self: float = -5.0
     reward_got_killed: float = -5.0
-    reward_survived: float = 0.0    # tried in Phase 9, no measurable gain
+    reward_survived: float = 0.0    # tried, no measurable gain
     reward_trapped: float = 0.0
     reward_bomb_no_escape: float = 0.0
     reward_bomb_wasted: float = 0.0

@@ -3,14 +3,14 @@ into the numbers the experiment log reports.
 
 Two modes:
 
-FAST   one process per seed, n_rounds rounds each. Cheap, used for sweeps and
-       ablations. by_agent only has totals, so we get means but no per-round
-       distribution and no real win rate.
+FAST   one process per seed, n_rounds rounds each. Cheap, for sweeps and
+       ablations. by_agent only has totals: means, no per-round distribution,
+       no real win rate.
 EXACT  one process per seed, one round each, so every stats file describes a
        single round. Slow (process startup dominates) but gives win rate and
        survival honestly.
 
-Always played with --train 0 so the framework keeps rounds going after our
+Always played with --train 0 so the framework keeps rounds going after the
 agent dies, instead of cutting them short.
 """
 
@@ -50,8 +50,8 @@ def config_env_var(agent):
 # has not seen. Same list for every experiment, so runs stay comparable.
 EVAL_SEEDS = list(range(9001, 9031))
 
-# Cap on one play call. Generous - the slowest block seen is about 120 s - but
-# a wedged child would otherwise block the pool indefinitely.
+# Cap on one play call, generous (slowest block seen is ~120s), just enough
+# to stop a wedged child blocking the pool indefinitely.
 PLAY_TIMEOUT = 900
 
 
@@ -84,8 +84,7 @@ def _play(args):
 
 
 def _agent_key(stats, agent_name, index=0):
-    """Find our agent in by_agent; the framework adds _0/_1 when the same code
-    plays several slots."""
+    """Find the agent in by_agent; framework adds _0/_1 for repeated code."""
     keys = list(stats["by_agent"].keys())
     if agent_name in keys:
         return agent_name
@@ -168,9 +167,8 @@ def evaluate(agent, opponents, scenario, mode="fast", seeds=None, n_rounds=30,
                 wins += 1
             elif opp_scores and my_mean_score == best_opp:
                 draws += 1
-            # Survived = polled on every step AND didn't blow itself up. The
-            # step check alone isn't enough: solo, the round ends when we die,
-            # so our step count always equals the round length.
+            # survived = polled every step AND no suicide. Step count alone
+            # isn't enough since solo, a round ends exactly when the agent dies
             only_round = next(iter(stats["by_round"].values()))
             if me.get("steps", 0) >= only_round["steps"] and not me.get("suicides", 0):
                 survived += 1
@@ -211,8 +209,8 @@ def evaluate(agent, opponents, scenario, mode="fast", seeds=None, n_rounds=30,
     return metrics
 
 
-# Column order of experiments/registry.csv. Don't reorder - old rows would no
-# longer line up with the header.
+# Column order of experiments/registry.csv. Don't reorder, or old rows stop
+# lining up with the header.
 FIELDS = ["timestamp", "exp_id", "tag", "mode", "agent", "opponents", "scenario", "seeds",
           "rounds_per_seed", "mean_score", "score_std", "score_margin", "score_margin_std",
           "mean_coins", "coins_std", "mean_kills", "kills_std", "suicide_rate", "suicide_std",

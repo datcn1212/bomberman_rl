@@ -1,18 +1,18 @@
 """Check that the numbers quoted in report_tabular_q.md still match the data.
 
-A log this long collects figures that were right when written and stopped being
-right later - a run got repeated, a config changed underneath. This re-derives
-the headline numbers from the registry so a script catches a stale one instead
-of a reader.
+A log this long collects figures that were right when written and later go
+stale: a run gets repeated, a config changes underneath. This re-derives the
+headline numbers from the registry so a script catches a stale one instead of
+a reader.
 
 Numbers come from experiments/registry.csv, which is committed. An earlier
 version read per-run logs under results/, which isn't tracked, so every check
 quietly turned into a SKIP and the tool reported success while verifying
 nothing. A check that can't run now counts as a failure.
 
-An exp id alone doesn't identify a measurement - the same models are often
-measured 1v1 and four-agent, and both rows sit in the registry - so each claim
-also says how many opponents it was measured against.
+An exp id alone doesn't identify a measurement, since the same models are
+often measured 1v1 and four-agent with both rows in the registry, so each
+claim also states how many opponents it was measured against.
 
     python3 tools/audit_report.py
 """
@@ -78,9 +78,9 @@ def per_seed(rows, exp_id, opponents, key):
     for row in rows:
         if not re.fullmatch(re.escape(exp_id) + r"_seed\d+", row["exp_id"]):
             continue
-        # Counts rule_based_agent and rule_based_seeded alike: from Phase 26 on
-        # we used the seeded variant, and the two measured interchangeable
-        # (paired t = -0.13), so they index the same setting.
+        # Counts rule_based_agent and rule_based_seeded alike: later runs used
+        # the seeded variant, and the two measured interchangeable (paired
+        # t = -0.13), so they index the same setting.
         if row["opponents"].count("rule_based") != opponents:
             continue
         if row[key] in ("", "nan"):

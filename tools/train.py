@@ -71,9 +71,8 @@ def run_seed(job):
     previous = None
     model_path = None
     for phase_index, (scenario, episodes, opponents) in enumerate(phases):
-        # A checkpoint per phase, not one per seed: "did the skill survive the
-        # next phase" is exactly what a curriculum makes you ask, and
-        # overwriting one file destroys the evidence.
+        # checkpoint per phase, not per seed, so overwriting one doesn't lose
+        # whether the skill survived the next phase
         model_path = seed_dir / ("model_phase%d.pkl" % phase_index)
 
         cfg = dict(overrides)
@@ -95,9 +94,8 @@ def run_seed(job):
                "--n-rounds", str(episodes),
                "--seed", str(TRAIN_SEED_BASE + seed_index)]
         if full_rounds:
-            # Otherwise the round ends the moment we die, so a reckless policy
-            # generates 30-step episodes and a passive one 400. The learner
-            # then sees mostly passive transitions, which reinforces itself.
+            # otherwise a reckless policy's rounds end at 30 steps, a passive
+            # one's at 400, and training skews toward whichever ends later
             cmd.append("--continue-without-training")
 
         # Seeded opponent during training too, so a run repeats. Deriving
@@ -159,7 +157,7 @@ def main():
     parser.add_argument("--eval-rounds", type=int, default=20)
     parser.add_argument("--eval-seeds", type=int, default=len(EVAL_SEEDS))
     parser.add_argument("--full-rounds", action="store_true",
-                        help="don't cut rounds short when our agent dies")
+                        help="don't cut rounds short when the agent dies")
     parser.add_argument("--workers", type=int, default=3)
     parser.add_argument("--eval-workers", type=int, default=4)
     parser.add_argument("--note", default="")
