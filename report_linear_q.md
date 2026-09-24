@@ -24,7 +24,8 @@ model - seed 10 of the solo-trained configuration, 0.510 on held-out arenas
 directly at the score-survival trade, `reward_survived`, was tested and
 rejected (Phase 9): it inherits the same rare-terminal-event problem
 `escape_shaping` was built to avoid, since `SURVIVED_ROUND` fires in only 2.3%
-of training episodes.
+of training episodes. On Task 3 the shipped model does not hunt at all: 0.007
+kills per round against `peaceful_agent` (see "Task 3, evaluation only").
 
 ---
 
@@ -61,7 +62,7 @@ baseline to compare a schedule against.
 
 **D4 symmetry** is reused exactly as tabular_q established it: `canonical_frame`
 picks the same permutation `tabular_q.model.canonical` would (same tie-break,
-cross-checked on 500 random boards, two independent tests), and phi()
+cross-checked on 200 random boards, two independent tests), and phi()
 vectorises the *relabelled* observation. The choice of frame only asks "which
 of eight equivalent views is canonical" - representation-independent - so the
 tested function is reused rather than re-derived.
@@ -713,15 +714,19 @@ ten seeds, weight 0.1, evaluated on the four-agent board:
 | self-kill rate | 0.527 | 0.888 |
 | bombs per round | 17.9 | 4.4 |
 | crates per round | 35.4 | 4.9 |
-| steps survived | 344 | 327 |
+| steps survived | 221 | 56 |
 
 Paired over the same ten seeds, tabular_q is ahead by 2.080 (sd 0.511),
 t = 12.88, and ahead on all ten seeds individually.
 
-The two agents survive about equally long - 344 steps against 327 - so the gap
-is not that linear_q dies sooner. It barely acts: 4.4 bombs and 4.9 crates per
-round against 17.9 and 35.4. On `classic` every coin starts under a crate, so a
-policy that does not break crates cannot score however long it lives.
+*Corrected 2026-09-24:* this row first showed 344 against 327, which is the
+mean *round* length (`mean_steps`), not the agent's own survival - on the
+four-agent board a round goes on after the agent dies. The agent's own steps,
+read from the per-arena stats files of these runs (`results/eval/`), are 221
+for tabular_q and 56 for linear_q. So linear_q does die sooner: it kills itself
+in 89% of rounds, places a quarter as many bombs as tabular_q (4.4 against
+17.9) and clears fewer crates per bomb (1.1 against 2.0), on a board where
+every coin starts under a crate.
 
 Training with opponents made this agent *worse* (0.130) than training it solo
 and dropping it in (0.398), the opposite of tabular_q's own Phase 17a (+0.42).
@@ -730,8 +735,7 @@ The direction is not attributable to either factor: the solo-trained models had
 once.
 
 Training took 13114 s for ten seeds - about 25x the per-episode cost of the solo
-run in Phase 6, since every step simulates four agents and the agent now
-survives most of the round.
+run in Phase 6, since every step simulates four agents.
 
 **Decision:** not competitive on the tournament protocol. tabular_q is the
 submitted agent; this branch's value is that it shares the observation code,
@@ -809,7 +813,9 @@ real submission code, not inspected as a raw pickle: `phi_dim` 33 and
 
 Worst-case decision time, measured through `callbacks.act` over a full
 400-step episode: mean 0.036 ms, worst 0.103 ms - about 4900x inside the 500 ms
-budget. Played once through the real engine (`main.py play`, no config file,
+budget. (Re-measured 2026-09-24 with `tools/ship.py check --agent linear_q`,
+whose timing uses constructed worst-case states: worst 0.172-0.193 ms over
+three runs, 10/10 checks pass.) Played once through the real engine (`main.py play`, no config file,
 so pure `Config()` defaults) against three `rule_based_agent`: finishes without
 error, 60 bombs and 54 crates across two rounds, confirming the shipped model
 is not the collapsed, inert kind Phase 3 and Phase 5's weight=1.0 arm produced.
@@ -916,6 +922,25 @@ here beat it. Kept as a negative result because the mechanism is now
 understood, not just the outcome: any future attempt at this axis needs a
 dense, per-step signal (a potential, not a terminal bonus) or it will hit the
 same rarity problem.
+
+---
+
+## Task 3, evaluation only
+
+Measured on 2026-09-24: the shipped model on its defaults against one
+opponent, fast mode, arenas 9001-9030 x 20 rounds (`task3_*` rows), next to the
+shipped tabular_q model and `rule_based_agent` under the same protocol.
+
+| | vs `peaceful_agent`: kills | score | self-kill | vs `coin_collector_agent`: kills | score | self-kill |
+|---|---|---|---|---|---|---|
+| linear Q | 0.007 | 0.540 | 0.893 | 0.008 | 0.510 | 0.873 |
+| tabular Q | 0.675 | 11.678 | 0.060 | 0.070 | 3.897 | 0.127 |
+| `rule_based_agent` | 0.975 | 13.050 | 0.063 | 0.082 | 5.450 | 0.167 |
+
+The linear agent blows up the random-walking `peaceful_agent` in 0.7% of
+rounds and kills itself in nearly nine of ten. That matches the rush-and-die
+policy of Phase 6, and the model never saw another agent in training (solo on
+`loot-crate`).
 
 ---
 

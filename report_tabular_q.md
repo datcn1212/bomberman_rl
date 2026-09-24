@@ -4,11 +4,12 @@ Working log for the agent in `agent_code/tabular_q/`. One entry per phase: what
 changed, what it measured, what was decided. Negative results are kept, because
 a change that did nothing is still evidence.
 
-**Where this stands.** Twenty-five phases. The agent plays Task 2 well (8.88
-coins solo) and is still **below the reference on the four-agent board**: 2.275
-against `rule_based_agent` at 3.260. Every intervention that raised the
-four-agent score so far did it by bombing *less*; nothing yet has made the agent
-bomb *better*. That is the open problem.
+**Where this stands.** Twenty-seven phases. The shipped model (Phase 26, seed 6)
+beats `rule_based_agent` solo on `classic` (8.713 coins against 8.532) and is
+within the noise of it against opponents: 2.793 against 3.012 on the four-agent
+board, z = -1.53 paired over 600 arenas. There it kills at least as often as the
+reference but collects 0.40 fewer coins per round, which no phase has targeted
+yet. See "Final result, re-measured for the shipped model" near the end.
 
 **How to read it.** The phase table below is the index. Each phase states the one
 thing it changed and the number that decided it. Every quoted figure is
@@ -1273,7 +1274,15 @@ several thousand episodes into a run that had already cost an hour and a half.
 
 ---
 
-## Final result
+## Final result of 16 August (superseded)
+
+> **Superseded.** The model measured here, `final_tabular_q/seed10`, stopped
+> loading when Phase 22 widened the encoding from six slots to eight, and
+> Phase 26 shipped a new model (`p26_anchor/seed6`). Its own measurement is in
+> the next section; the numbers below stay as a record of the older model.
+> Arenas 9001-9600 also contain the selection block 9101-9130, so the claim
+> below that they took no part in the choice is not quite right; the next
+> section checks how much that matters.
 
 The shipped model is `experiments/final_tabular_q/seed10/model.pkl`, chosen on
 arenas 9101-9130 and reported below on arenas 9001-9600, which took no part in
@@ -1329,6 +1338,60 @@ on the empty one.
 
 ---
 
+## Final result, re-measured for the shipped model
+
+Measured on 2026-09-24 with the same tool (`python3 tools/ship.py final --agent
+tabular_q`, EXACT mode, 600 rounds) on the same 600 arenas as the reference rows
+of 16 August. Neither the framework nor the opponents' code has changed since
+15 August, so those reference rows still apply. The registry rows are the latest
+`FINAL-*-tabular_q` entries.
+
+| setting | metric | tabular Q (shipped) | `rule_based_agent` | paired over arenas |
+|---|---|---|---|---|
+| **Task 2, solo** | coins (of 9) | **8.713** | 8.532 | +0.182, z = +3.41 |
+| **Task 4, 1v1** | score | **4.963** | 4.775 | +0.188, z = +1.19 |
+| | win rate | 0.423 | **0.508** | -0.085, z = -3.04 |
+| | kills | **0.223** | 0.048 | +0.175, z = +9.25 |
+| | coins | 3.847 | **4.533** | -0.687, z = -5.87 |
+| | self-kill | 0.518 | **0.417** | |
+| **Task 4, four agents** | score | 2.793 | **3.012** | -0.218, z = -1.53 |
+| | win rate | 0.185 | **0.195** | -0.010, z = -0.46 |
+| | kills | **0.198** | 0.162 | +0.037, z = +1.53 |
+| | coins | 1.802 | **2.203** | -0.402, z = -5.83 |
+| | self-kill | 0.540 | 0.555 | |
+| | survival | 0.342 | **0.373** | |
+| | crates | **39.80** | 30.24 | |
+
+The 600 arenas contain the 30 selection arenas. Leaving them out changes nothing
+that matters: four-agent score 2.793 -> 2.789 (reference 3.012 -> 2.975), 1v1
+4.963 -> 4.953, solo 8.713 -> 8.711.
+
+**Task 3, evaluation only.** Fast mode, arenas 9001-9030 x 20 rounds, one
+opponent, shipped models on their defaults (`task3_*` rows):
+
+| | vs `peaceful_agent`: kills | score | vs `coin_collector_agent`: kills | score |
+|---|---|---|---|---|
+| tabular Q | 0.675 | 11.678 | 0.070 | 3.897 |
+| linear Q | 0.007 | 0.540 | 0.008 | 0.510 |
+| `rule_based_agent` | **0.975** | **13.050** | **0.082** | **5.450** |
+
+**Task 1 reference.** `rule_based_agent` clears `coin-heaven` in 125.0 steps on
+the Phase 2 protocol (`ref_rule_coinheaven`), against 123.9 for the Phase 2
+agent.
+
+**Decision time, re-measured.** `tools/ship.py check --agent tabular_q` on the
+shipped model, three runs: worst case 0.270, 0.185 and 0.175 ms (mean 0.08 ms),
+against the 0.16 ms recorded in Phase 26.3. The worst case moves with machine
+load; all runs stay under 0.3 ms and pass 10/10 checks.
+
+**Reading.** With opponents, the gap to the reference is not in bombing: the
+agent kills at least as often, breaks 32% more crates and kills itself about as
+often, but collects 0.40 fewer coins per round on the four-agent board. It
+opens crates and then fails to collect what they reveal while three others
+contest the board, and no phase has targeted that.
+
+---
+
 ## Settings currently in force
 
 The `config.py` defaults, which is what the tournament runs, since it starts the
@@ -1342,7 +1405,7 @@ use_symmetry True, use_opponent_blocking True
 reward_bomb_wasted 0, shaping_weight 0
 rewards: coin +1, kill +5, crate +0.3, coin_found +0.1, invalid -0.5,
          wait -0.05, step -0.01, killed_self -5, got_killed -5
-budget: 12000 episodes on `classic` with opponents
+budget: 6000 episodes on `classic` against three seeded opponents (Phase 19)
 ```
 
 ## Rejected, with evidence
@@ -1356,7 +1419,7 @@ Each was measured, not argued about. Phase in brackets.
 | wasted-bomb penalty [6, 7] | no effect once the budget was raised (t=0.19) |
 | Max-Boltzmann exploration [8, 11] | helps at gamma 0.99 without symmetry, harmful with it |
 | curriculum `loot-crate` -> `classic` [9, 22] | t=+0.46; neutral again when re-tested properly |
-| gamma above 0.995, and gamma = 1 [11, 15] | mean down, variance x9 |
+| gamma above 0.995, and gamma = 1 [11, 15] | mean down, between-seed sd x9 |
 | combining the marginal effects [13] | 7.41 against 8.88; the optimum had moved |
 | death penalty -15 [17b] | score -0.50 |
 | `bomb_safety` [20] | score -0.62, bombs +54% |
@@ -1365,14 +1428,14 @@ Each was measured, not argued about. Phase in brackets.
 
 ## Open
 
-1. **The agent is below the reference where it counts.** 2.275 on the four-agent
-   board against `rule_based_agent` at 3.260; win rate 0.153 against 0.195.
-2. **Nothing has made the agent bomb better.** Both interventions that raised the
-   four-agent score did it by bombing less. That is the substantive problem, and
-   it is where the remaining 1.0 point sits.
-3. **A second model.** The submission needs at least two and this branch has one
-   function approximator. Q against SARSA shares the table, the encoding and the
-   features, so it may not count as two.
+1. **Coins against opponents.** The shipped model is within the noise of the
+   reference on score but collects 0.40 fewer coins per round on the four-agent
+   board while killing at least as often. No phase has targeted the race for
+   revealed coins.
+2. **Nothing has made the agent bomb more safely.** The interventions aimed at
+   dying less bought safety by bombing less (wasted-bomb penalty, death -15),
+   and `bomb_safety` made the agent worse.
+3. **A second model.** Resolved: `linear_q` (`report_linear_q.md`).
 4. **Re-check against `settings.py`.** The course may change the mechanics up to
    seven days before the agent deadline, and every timing constant in the danger
    schedule depends on them.

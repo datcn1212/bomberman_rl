@@ -2,8 +2,9 @@
 
 EXACT mode, one process per round, so win rate and survival are counted rather
 than inferred, and 600 rounds per setting because a head-to-head claim on less
-isn't worth making. Arenas start at 9001; the model was chosen on a disjoint
-block, so none of these rounds helped pick it.
+isn't worth making. Arenas are 9001-9600, so they contain the 30 arenas
+`choose` ranks seeds on (9101-9130); report_tabular_q.md checks that leaving
+those out changes nothing that matters.
 
     python3 tools/ship.py final --agent tabular_q --reference
 """
