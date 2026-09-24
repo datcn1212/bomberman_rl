@@ -40,8 +40,10 @@ and held constant - each was measured and rejected in Phases 5, 20 and 22. They
 stay in the layout so that every model ever saved still loads; their producing
 code was removed in Phase 25 and lives in git history.
 
-About 630-750 rows are ever visited, so the table is a **sparse dict** rather
-than an array, which would be 98.6% zeros.
+Without D4 folding a trained table visits about 600-770 rows (Phases 3-11);
+with folding the shipped table holds 358. Either way the table is a **sparse
+dict** rather than an array: over the 43,740 cells the five active components
+address, an array would be more than 98% zeros.
 
 **Rewards** - the game score (1/coin, 5/kill) is far too sparse to learn from, so
 reward is assembled from the per-step event list. Every weight lives in

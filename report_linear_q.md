@@ -11,8 +11,8 @@ systematically - 60% of seeds learned to bomb once and then do almost nothing,
 immune to re-sweeping the step-size schedule, which only moved which seed
 failed. Potential-based shaping toward escaping danger removed the collapse
 entirely (0/10 seeds at `coins=0.000`), and its weight was then swept: too much
-of it re-creates the collapse from the opposite direction, by suppressing
-bombing itself. Doubling the budget to 12000 episodes raised score 83% and
+of it re-creates the collapse from the opposite direction: the agent keeps
+bombing, but its bombs stop clearing crates. Doubling the budget to 12000 episodes raised score 83% and
 that gain transfers to `classic`, but it bought score with lives - the agent
 now dies in 94% of rounds, at step 56 of 400, against tabular_q's 3.0% suicide
 on the same scenario. The open problem is no longer collapse or convergence; it
@@ -574,11 +574,15 @@ collapse, reached from the opposite direction.
 | 0.5 | 1.271 | 0.429 | 32.17 | 7.86 | 239.3 | 0 |
 | 1.0 | **0.047** | 0.619 | 16.66 | 3.44 | 155.8 | **6 / 10** |
 
-The prediction held. At weight 1.0 crates fall from ~10 to 3.44, score
-collapses to 0.047, and six of ten seeds are back at `coins = 0.000` - the same
+The collapse came, but not by the predicted mechanism. At weight 1.0 score
+collapses to 0.047 and six of ten seeds are back at `coins = 0.000` - the same
 failure Phase 3 measured with no shaping at all, produced here by too much of
-it. Safety pressure large enough stops the agent creating the situation it is
-being rewarded for surviving.
+it. Bombing is not suppressed, though: the mean of 16.66 bombs per round is
+pulled up by seeds 1 and 7, which place 57.0 per round and survive all 400
+steps without a coin, and the other eight still place 3.52-9.69, about as many
+as most seeds at 0.05 or 0.1. What collapses is what the bombs achieve: crates
+per round fall from ~10 to 3.44 (every seed at or below 4.50). The prediction
+is recorded as wrong about the mechanism.
 
 Everything between 0.05 and 0.5 is safe from collapse, and inside that band
 there is a real trade: 0.05 scores highest and suicides most (0.698), 0.5
@@ -951,9 +955,9 @@ entries are updated hundreds of thousands of times more than others (2.2).
 50000 each rescue a different seed than 1000 does while leaving another
 seed passive or broken. The failure follows the seed, not the schedule value.
 
-`escape_shaping_weight` at 1.0 or above (5.2) - large enough safety pressure
-stops the agent bombing at all, re-creating Phase 3's collapse (6/10 seeds at
-`coins = 0.000`, score 0.047) from the opposite direction. The usable band is
+`escape_shaping_weight` at 1.0 or above (5.2) - the agent keeps bombing but
+its bombs stop clearing crates (3.44 per round), re-creating Phase 3's collapse
+(6/10 seeds at `coins = 0.000`, score 0.047) from the opposite direction. The usable band is
 roughly 0.05 to 0.5.
 
 `reward_survived` at 1.0, 3.0 or 5.0 (9.2-9.3) - paired against a matched
